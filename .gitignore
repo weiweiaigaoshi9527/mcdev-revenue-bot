@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 配置与缓存
+.env
+.env.local
+*.log
+
+# 本地预览产物
+preview/
+
+# 运行缓存（头像等）
+.cache/
+
+# Android(Termux) 后台运行产物（PID / 日志）
+.run/
+
+# 传输压缩包
+*.zip
+
+# 编辑器
+.idea/
+.vscode/
