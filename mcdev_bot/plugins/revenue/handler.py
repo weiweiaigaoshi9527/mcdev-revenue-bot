@@ -6,7 +6,13 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from nonebot import get_driver, on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    GroupMessageEvent,
+    Message,
+    MessageEvent,
+    MessageSegment,
+)
 from nonebot.log import logger
 from nonebot.params import CommandArg
 
@@ -15,12 +21,19 @@ from ...config import settings
 from ...formatter import (
     HELP_TEXT,
     partner_lines,
+    render_activities,
+    render_analytics,
+    render_balance,
     render_daily_average,
+    render_feedback,
+    render_flashsale,
+    render_flashsale_history,
     render_income,
     render_income_summary,
     render_maps,
     render_monthly,
     render_overview,
+    render_refund,
     render_settlement,
     render_status,
     render_trend,
@@ -201,6 +214,84 @@ income_cmd = on_command(
 settle_cmd = on_command(
     "结算",
     aliases={"官方结算", "收益结算", "结算单", "settlement"},
+    priority=5,
+    block=True,
+)
+
+# —— 账户余额 ——
+balance_cmd = on_command(
+    "余额",
+    aliases={"钱包", "账户余额", "余额查询", "balance", "wallet"},
+    priority=5,
+    block=True,
+)
+
+# —— 玩家反馈 / 退款 ——
+feedback_cmd = on_command(
+    "反馈",
+    aliases={"玩家反馈", "feedback"},
+    priority=5,
+    block=True,
+)
+refund_feedback_cmd = on_command(
+    "退款反馈",
+    aliases={"玩家退款反馈", "refundfeedback"},
+    priority=5,
+    block=True,
+)
+refund_cmd = on_command(
+    "退款账单",
+    aliases={"退款", "退款明细", "退款率", "refund"},
+    priority=5,
+    block=True,
+)
+
+# —— 运营数据（日活 / 涨粉 / 时长）——
+analytics_cmd = on_command(
+    "数据",
+    aliases={"运营", "运营数据", "日活", "analytics", "dau"},
+    priority=5,
+    block=True,
+)
+
+# —— 活动中心 ——
+activity_cmd = on_command(
+    "活动",
+    aliases={"作品活动", "折扣特卖", "特卖", "征集", "activities"},
+    priority=5,
+    block=True,
+)
+activity_check_cmd = on_command(
+    "新活动",
+    aliases={"活动检查", "checkactivity"},
+    priority=5,
+    block=True,
+)
+
+# —— 周末秒杀 ——
+flashsale_cmd = on_command(
+    "秒杀",
+    aliases={"周末秒杀", "秒杀日期", "flashsale"},
+    priority=5,
+    block=True,
+)
+flashsale_log_cmd = on_command(
+    "秒杀记录",
+    aliases={"秒杀历史", "秒杀申请记录", "flashsalelog"},
+    priority=5,
+    block=True,
+)
+flashsale_apply_cmd = on_command(
+    "秒杀申请",
+    aliases={"申请秒杀", "flashsaleapply"},
+    priority=5,
+    block=True,
+)
+
+# —— 作品 ID（供群成员查看并用于秒杀申请）——
+items_id_cmd = on_command(
+    "作品ID",
+    aliases={"模组ID", "作品id", "模组id", "itemid", "ids"},
     priority=5,
     block=True,
 )
@@ -457,16 +548,12 @@ async def _handle_monthly_chart(event: MessageEvent, args: Message = CommandArg(
 
 
 def _append_partners(message: Message, shares, heading: str) -> Message:
-    """把团队分成（含 @）追加到消息里。"""
+    """把团队分成追加到消息里（按需求不 @ 成员，仅列出名字与金额）。"""
     if not shares:
         return message
     message += MessageSegment.text(f"\n\n{heading}\n")
-    for share, line in zip(shares, partner_lines(shares)):
-        if share.partner.qq:
-            message += MessageSegment.at(share.partner.qq)
-            message += MessageSegment.text(f" {line}\n")
-        else:
-            message += MessageSegment.text(f"{line}\n")
+    for line in partner_lines(shares):
+        message += MessageSegment.text(f"{line}\n")
     return message
 
 
@@ -482,6 +569,253 @@ async def _handle_settlement(event: MessageEvent):
         await settle_cmd.finish(f"查询失败：{exc}")
         return
     await settle_cmd.finish(render_settlement(records))
+
+
+@balance_cmd.handle()
+async def _handle_balance(event: MessageEvent):
+    """展示账户余额：可结算余额 + 已结算 + 待结算预估。"""
+    if not await _guard(balance_cmd, event):
+        return
+    try:
+        data = await get_service().balance()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询账户余额失败")
+        await balance_cmd.finish(f"查询失败：{exc}")
+        return
+    await balance_cmd.finish(render_balance(data))
+
+
+# ----------------------------------------------------------------------
+# 玩家反馈 / 退款
+# ----------------------------------------------------------------------
+@feedback_cmd.handle()
+async def _handle_feedback(event: MessageEvent):
+    """玩家反馈列表。"""
+    if not await _guard(feedback_cmd, event):
+        return
+    try:
+        items = await get_service().feedback_list()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询玩家反馈失败")
+        await feedback_cmd.finish(f"查询失败：{exc}")
+        return
+    await feedback_cmd.finish(render_feedback(items))
+
+
+async def _refund_data(days: int):
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+    return await get_service().refund_bills(
+        start=start.strftime("%Y%m%d"),
+        end=end.strftime("%Y%m%d"),
+    )
+
+
+@refund_feedback_cmd.handle()
+async def _handle_refund_feedback(event: MessageEvent, args: Message = CommandArg()):
+    """玩家退款反馈（退款原因与明细）。"""
+    if not await _guard(refund_feedback_cmd, event):
+        return
+    days = _parse_range(args.extract_plain_text(), default=30, lo=1, hi=180)
+    try:
+        data = await _refund_data(days)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询退款反馈失败")
+        await refund_feedback_cmd.finish(f"查询失败：{exc}")
+        return
+    await refund_feedback_cmd.finish(
+        render_refund(data, title="我的世界开发者收益 · 玩家退款反馈")
+    )
+
+
+@refund_cmd.handle()
+async def _handle_refund(event: MessageEvent, args: Message = CommandArg()):
+    """所有退款账单 + 退款率。"""
+    if not await _guard(refund_cmd, event):
+        return
+    days = _parse_range(args.extract_plain_text(), default=30, lo=1, hi=180)
+    try:
+        data = await _refund_data(days)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询退款账单失败")
+        await refund_cmd.finish(f"查询失败：{exc}")
+        return
+    await refund_cmd.finish(render_refund(data, title="我的世界开发者收益 · 退款账单"))
+
+
+# ----------------------------------------------------------------------
+# 运营数据（日活 / 涨粉 / 人均游玩时长）
+# ----------------------------------------------------------------------
+@analytics_cmd.handle()
+async def _handle_analytics(event: MessageEvent, args: Message = CommandArg()):
+    """日活 / 组件涨粉 / 人均游玩时长 / 退款率。"""
+    if not await _guard(analytics_cmd, event):
+        return
+    days = _parse_range(args.extract_plain_text(), default=7, lo=1, hi=180)
+    try:
+        data = await get_service().analytics(days=days)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询运营数据失败")
+        await analytics_cmd.finish(f"查询失败：{exc}")
+        return
+    await analytics_cmd.finish(render_analytics(data))
+
+
+# ----------------------------------------------------------------------
+# 活动中心
+# ----------------------------------------------------------------------
+@activity_cmd.handle()
+async def _handle_activity(event: MessageEvent):
+    """作品活动 / 折扣特卖 / 模组征集。"""
+    if not await _guard(activity_cmd, event):
+        return
+    try:
+        data = await get_service().activities()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询活动失败")
+        await activity_cmd.finish(f"查询失败：{exc}")
+        return
+    await activity_cmd.finish(render_activities(data))
+
+
+# ----------------------------------------------------------------------
+# 周末秒杀
+# ----------------------------------------------------------------------
+@flashsale_cmd.handle()
+async def _handle_flashsale(event: MessageEvent):
+    """可参与周末秒杀的日期与名额。"""
+    if not await _guard(flashsale_cmd, event):
+        return
+    try:
+        data = await get_service().flashsale_dates()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询秒杀日期失败")
+        await flashsale_cmd.finish(f"查询失败：{exc}")
+        return
+    await flashsale_cmd.finish(render_flashsale(data))
+
+
+@flashsale_log_cmd.handle()
+async def _handle_flashsale_log(event: MessageEvent):
+    """秒杀申请记录。"""
+    if not await _guard(flashsale_log_cmd, event):
+        return
+    try:
+        items = await get_service().flashsale_history()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询秒杀记录失败")
+        await flashsale_log_cmd.finish(f"查询失败：{exc}")
+        return
+    await flashsale_log_cmd.finish(render_flashsale_history(items))
+
+
+async def _is_group_admin(bot: Bot, event: MessageEvent) -> bool:
+    """仅群主 / 管理员可执行敏感操作。"""
+    if not isinstance(event, GroupMessageEvent):
+        return False
+    try:
+        info = await bot.get_group_member_info(
+            group_id=event.group_id, user_id=event.user_id, no_cache=True
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return str(info.get("role") or "") in ("owner", "admin")
+
+
+@flashsale_apply_cmd.handle()
+async def _handle_flashsale_apply(
+    bot: Bot, event: MessageEvent, args: Message = CommandArg()
+):
+    """提交周末秒杀申请（仅群主 / 管理员）。
+
+    用法：秒杀申请 日期 模组ID [限量]
+    例如：秒杀申请 20261016 4689696653497663244
+    """
+    if not await _guard(flashsale_apply_cmd, event):
+        return
+    if not await _is_group_admin(bot, event):
+        await flashsale_apply_cmd.finish("仅群主或管理员可以提交秒杀申请。")
+        return
+
+    parts = args.extract_plain_text().split()
+    if len(parts) < 2:
+        await flashsale_apply_cmd.finish(
+            "用法：秒杀申请 日期 模组ID [限量]\n"
+            "例如：秒杀申请 20261016 4689696653497663244\n"
+            "可申请日期请先发送「秒杀」查看。"
+        )
+        return
+
+    raw_date = parts[0].replace("-", "").strip()
+    item_id = parts[1].strip()
+    num = 1000
+    if len(parts) >= 3:
+        try:
+            num = int(parts[2])
+        except ValueError:
+            num = 1000
+
+    if not (len(raw_date) == 8 and raw_date.isdigit()):
+        await flashsale_apply_cmd.finish("日期格式应为 YYYYMMDD，例如 20261016。")
+        return
+
+    svc = get_service()
+    # 先校验该日期是否在可申请列表内，避免无效提交
+    try:
+        info = await svc.flashsale_dates()
+    except Exception:  # noqa: BLE001
+        info = {}
+    allowed = {d["date"] for d in (info.get("dates") or [])}
+    if allowed and raw_date not in allowed:
+        await flashsale_apply_cmd.finish(
+            f"{raw_date} 不在可申请范围内，请先发送「秒杀」查看可申请日期。"
+        )
+        return
+
+    try:
+        await svc.apply_flashsale(item_id=item_id, date=raw_date, num=num)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("提交秒杀申请失败")
+        await flashsale_apply_cmd.finish(f"提交失败：{exc}")
+        return
+
+    await flashsale_apply_cmd.finish(
+        f"已提交秒杀申请\n日期：{raw_date}\n模组ID：{item_id}\n限量：{num}\n"
+        "可在「秒杀记录」中查看审核状态。"
+    )
+
+
+@items_id_cmd.handle()
+async def _handle_items_id(event: MessageEvent):
+    """列出账号内作品的 ID（便于发给群成员用于秒杀申请）。"""
+    if not await _guard(items_id_cmd, event):
+        return
+    try:
+        items = await get_service().items()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("查询作品列表失败")
+        await items_id_cmd.finish(f"查询失败：{exc}")
+        return
+
+    if not items:
+        await items_id_cmd.finish("账号下暂无作品。")
+        return
+
+    lines = [
+        "我的世界开发者收益 · 作品 ID 清单",
+        "",
+    ]
+    for it in items:
+        tag = ""
+        if str(it.price_type).lower() == "diamond":
+            tag = "　［钻石］" if int(it.price or 0) >= 100 else "　［钻石·不足100，不可秒杀］"
+        elif it.price_type:
+            tag = f"　［{it.price_type}］"
+        lines.append(f"· {it.item_name}{tag}")
+        lines.append(f"  ID：{it.item_id}")
+    lines.append("")
+    lines.append("申请秒杀：秒杀申请 日期 作品ID")
+    await items_id_cmd.finish("\n".join(lines))
 
 
 @income_cmd.handle()
@@ -666,6 +1000,151 @@ async def _do_push(targets: Optional[List[str]] = None) -> int:
 
 
 # ----------------------------------------------------------------------
+# 新活动监控（模组征集 / 折扣特卖）
+# ----------------------------------------------------------------------
+def _activity_state_path():
+    """已推送过的活动 ID 记录文件。"""
+    from ...profile import CACHE_DIR
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / "activities.json"
+
+
+def _load_seen_activities() -> set:
+    import json
+
+    path = _activity_state_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return set(data.get("seen") or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _save_seen_activities(seen: set) -> None:
+    import json
+
+    try:
+        _activity_state_path().write_text(
+            json.dumps({"seen": sorted(seen)}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("保存活动记录失败")
+
+
+def _build_activity_message(new_items: List[dict]) -> Message:
+    """把新活动渲染成一条推送消息（含完整活动信息）。"""
+    lines = ["【新活动】我的世界开发者 模组征集 / 特卖活动", ""]
+    for a in new_items:
+        lines.append(f"■ {a.get('name') or '未命名活动'}")
+        if a.get("apply_end_at"):
+            lines.append(f"报名截止：{a.get('apply_end_at')}")
+        if a.get("begin_at") or a.get("end_at"):
+            lines.append(f"活动时间：{a.get('begin_at')} ~ {a.get('end_at')}")
+        desc = str(a.get("desc") or "").strip()
+        if desc:
+            lines.append(desc)
+        instr = str(a.get("instruction") or "").strip()
+        if instr and instr != desc:
+            lines.append(f"活动说明：{instr}")
+        modules = a.get("modules") or []
+        if modules:
+            names = "、".join(
+                str(m.get("module_name") or "") for m in modules if m.get("module_name")
+            )
+            if names:
+                lines.append(f"可参与模块：{names}")
+        lines.append("")
+    lines.append("发送「活动」查看全部活动详情")
+    return Message(MessageSegment.text("\n".join(lines)))
+
+
+async def _check_new_activities(push: bool = True) -> List[dict]:
+    """检查是否有新的模组征集活动；返回新活动列表。"""
+    try:
+        data = await get_service().activities()
+    except Exception:  # noqa: BLE001
+        logger.exception("检查新活动失败")
+        return []
+
+    review = data.get("review") or []
+    seen = _load_seen_activities()
+    fresh = [a for a in review if a.get("id") and a["id"] not in seen]
+
+    # 首次运行：只记录基线，不推送（避免把历史活动全部推一遍）
+    if not seen:
+        _save_seen_activities({a["id"] for a in review if a.get("id")})
+        logger.info("活动监控已建立基线，共 {} 个活动", len(review))
+        return []
+
+    if fresh and push:
+        _save_seen_activities(seen | {a["id"] for a in fresh})
+    return fresh
+
+
+async def _do_activity_push() -> int:
+    """检查并把新活动推送到目标群。"""
+    from nonebot import get_bots
+
+    fresh = await _check_new_activities(push=False)
+    if not fresh:
+        return 0
+
+    bots = get_bots()
+    if not bots:
+        logger.warning("新活动推送跳过：当前没有已连接的 OneBot")
+        return 0
+    bot: Bot = next(iter(bots.values()))
+    message = _build_activity_message(fresh)
+    ok = await _deliver(bot, message, settings.activity_targets)
+    if ok:
+        seen = _load_seen_activities()
+        _save_seen_activities(seen | {a["id"] for a in fresh if a.get("id")})
+        logger.info("已推送 {} 个新活动到 {} 个目标", len(fresh), ok)
+    return ok
+
+
+@activity_check_cmd.handle()
+async def _handle_activity_check(event: MessageEvent):
+    """手动检查是否有新活动（不推送，只列出）。"""
+    if not await _guard(activity_check_cmd, event):
+        return
+    fresh = await _check_new_activities(push=False)
+    if not fresh:
+        await activity_check_cmd.finish("当前没有新活动。")
+        return
+    await activity_check_cmd.finish(
+        "发现新活动：\n" + "\n".join(f"· {a.get('name')}" for a in fresh)
+    )
+
+
+def _register_activity_watch() -> None:
+    if not settings.activity_watch:
+        return
+    try:
+        from nonebot_plugin_apscheduler import scheduler
+    except ImportError:  # pragma: no cover
+        return
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=",".join(str(h) for h in (settings.activity_check_hours or [9, 15, 21])),
+        minute=settings.activity_check_minute,
+        id="mcdev_activity_watch",
+    )
+    async def _watch() -> None:
+        await _do_activity_push()
+
+    logger.info(
+        "已注册新活动监控：每天 {} 时 {:02d} 分检查，目标 {}",
+        ",".join(str(h) for h in (settings.activity_check_hours or [9, 15, 21])),
+        settings.activity_check_minute,
+        settings.activity_targets or "（未配置）",
+    )
+
+
+# ----------------------------------------------------------------------
 # 定时推送（可选，支持每天多个时间点）
 # ----------------------------------------------------------------------
 def _register_push() -> None:
@@ -739,6 +1218,9 @@ async def _on_startup() -> None:
     logger.info("mcdev 收益插件已启动，数据模式：{}，平台：{}", mode, settings.platform)
     await _load_profile()
     _register_push()
+    _register_activity_watch()
+    # 启动时建立活动基线（首次运行不推送历史活动）
+    asyncio.create_task(_check_new_activities())
     if settings.member_scan_group:
         asyncio.create_task(_startup_member_scan())
 

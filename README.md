@@ -22,6 +22,17 @@
 | `趋势 [天数]` | 最近 N 天每日收益明细 |
 | `分成 [月数]` | **官方结算（真实）+ 团队贡献值分成（@ 成员）+ 规则推算（参考）** |
 | `结算` | **查看平台官方结算单**（当月收益 / 鼓励金额 / 税费等真实数值） |
+| `余额 [月数]` | **查看账户余额**（我的收益 / 未提取收益 / 结算方式 / 最近出账） |
+| `反馈` | **玩家反馈**列表（内容 / 时间 / 处理状态） |
+| `退款反馈 [天数]` | **玩家退款反馈**（退款原因与明细） |
+| `退款账单 [天数]` | **所有退款账单 + 退款率** |
+| `数据 [天数]` | **日活 / 组件涨粉 / 人均游玩时长 / 退款率** |
+| `活动` | **作品活动**：模组征集 / 折扣特卖 |
+| `新活动` | 检查是否有新的模组征集活动 |
+| `秒杀` | **可参与周末秒杀的日期与名额** |
+| `秒杀记录` | 我的秒杀申请记录 |
+| `秒杀申请 日期 作品ID` | **提交周末秒杀申请**（仅群主 / 管理员） |
+| `作品ID` | 列出账号内作品的 ID（可发给群成员用于秒杀申请） |
 | `成员` | 列出当前群成员与 QQ 号，并标出命中 `MCDEV_PARTNERS` 的成员 |
 | `推送测试 [目标]` | **立即执行一次推送**（预览效果），不传目标则用配置的 `MCDEV_PUSH_TARGETS` |
 | `状态` | 检查开发者平台登录态 |
@@ -38,6 +49,11 @@
 | `趋势图 [天数]` | 每日钻石收益**折线图**（**默认展示「起始日 → 现在」的完整趋势**，带天数则只看最近 N 天，叠加销量虚线） |
 | `月报图 [月数]` | 各月**总流水 / 开发者分成**对比柱状图 |
 
+![收益看板示例](docs/sample-dashboard.png)
+
+各图表效果示例：[排行图](docs/sample-rank.png)｜[趋势图](docs/sample-trend.png)｜[月报图](docs/sample-monthly.png)
+（上图为演示数据渲染的收益看板）
+
 支持别名，例如 `总览 / overview / sy`、`图表 / 收益图 / 看板`、`月报图 / 月度图` 等。
 定时推送可通过 `.env` 开启，支持**每天多个时间点**（`MCDEV_PUSH_HOURS=10,12,14,16,18,20,22,0`），并可附带看板图片（`MCDEV_PUSH_CHART=true`）。
 若运行环境未安装 matplotlib，图表指令会自动降级为文字输出，不影响机器人运行。
@@ -51,6 +67,7 @@
 ```
 qqbot/
 ├── bot.py                     # 机器人启动入口
+├── start.bat                  # Windows 一键启动（装依赖 + 启动机器人）
 ├── requirements.txt
 ├── .env.example               # 配置模板（复制为 .env）
 ├── mcdev_bot/
@@ -64,9 +81,21 @@ qqbot/
 │   ├── chart.py               # 图表渲染（收益图片）
 │   ├── formatter.py           # QQ 文本排版
 │   └── plugins/revenue/       # NoneBot 指令插件
-├── preview/                   # 运行时生成的图片（自动创建，已 gitignore）
-└── .cache/                    # 头像等运行缓存（自动创建，已 gitignore）
+├── tools/
+│   ├── probe.py               # 连通性自检（校验 Cookie 与接口）
+│   └── replay.py              # 本地预览全部指令回复（无需 QQ）
+├── deploy/                    # 多平台部署脚本（Windows / Linux / Android）
+│   ├── README.md              # 多平台部署总览
+│   ├── windows/               # 计划任务自启（install/uninstall-service.ps1）
+│   ├── linux/                 # systemd 服务 + 一键安装脚本
+│   └── android/               # Termux 部署 + 免 root 接入指南（NapCat.Termux）
+├── preview/                   # replay 生成的图片（自动创建，已 gitignore）
+├── .cache/                    # 头像等运行缓存（自动创建，已 gitignore）
+└── docs/                      # 各图表效果示例图
 ```
+
+> 同一套代码支持 **Windows / Linux / Android** 三种服务端环境，
+> 详见 **[deploy/README.md](deploy/README.md)**。
 
 ---
 
@@ -146,13 +175,51 @@ MCDEV_CHART_ENABLED=true
 
 只想统计「地图」类作品时，可设置 `MCDEV_ITEM_KEYWORD=地图` 做名称筛选。
 
-### 5. 启动
+### 5. 自检、预览与启动
 
 ```powershell
+python tools/probe.py          # 校验 Cookie 与接口，并打印最近 7 天收益
+python tools/replay.py         # 本地预览全部指令回复（无需 QQ，图表存到 preview/）
 python bot.py                  # 启动机器人
 ```
 
+也可以直接双击 **`start.bat`**：会自动检查依赖并启动机器人。
+
 在 QQ 里私聊机器人或 @机器人 发送 `收益`、`地图`、`月报` 等指令即可。
+
+> `tools/replay.py` 是纯本地预览工具，用真实数据（或演示数据）把 12 条指令的输出
+> 全部打印出来，图表指令会把 PNG 存到 `preview/` 目录，方便在接入 QQ 前确认效果。
+> 常用参数：`--days 30` 指定天数，`--no-chart` 跳过图表。
+
+### 6. 部署为服务端（Windows / Linux / Android）
+
+同一套代码可作为服务端运行在三种平台上，差异只在「QQ 接入程序」与「进程守护方式」，
+反向 WS 地址统一为 `ws://127.0.0.1:8080/onebot/v11/ws`。
+
+| 平台 | QQ 接入 | 进程守护 | 一键部署 |
+| --- | --- | --- | --- |
+| **Windows** | NapCat | 计划任务（开机自启 + 崩溃重启） | `deploy\windows\install-service.ps1` |
+| **Linux** | NapCat / Lagrange | systemd | `./deploy/linux/install.sh` |
+| **Android** | NapCat.Termux（免 root）/ OpenShamrock | nohup + 唤醒锁 / Termux:Boot | `./deploy/android/install.sh` |
+
+```powershell
+# Windows（管理员 PowerShell）：注册开机自启服务
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1
+```
+
+```bash
+# Linux：一键部署为 systemd 服务
+chmod +x deploy/linux/install.sh && ./deploy/linux/install.sh
+```
+
+```bash
+# Android（Termux）：一键部署（机器人 + NapCat.Termux，免 root）
+chmod +x deploy/android/setup-all.sh && ./deploy/android/setup-all.sh
+```
+
+Android 无需 root：推荐 **NapCat.Termux** 一键部署（也可用 OpenShamrock + LSPatch），完整步骤见
+[deploy/android/README.md](deploy/android/README.md)；三平台对比与注意事项见
+[deploy/README.md](deploy/README.md)。
 
 ---
 

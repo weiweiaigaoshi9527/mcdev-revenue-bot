@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import time
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import httpx
 
@@ -127,7 +127,20 @@ class McDevClient:
             resp = await client.get(path, params=params or {})
         except httpx.HTTPError as exc:  # 网络层异常
             raise McDevError(f"请求 {path} 失败：{exc}") from exc
+        return self._decode(resp, path)
 
+    async def _post(self, path: str, json_body: Optional[dict] = None) -> dict:
+        """POST 请求（用于秒杀名额查询等）。"""
+        if not self.cfg.cookie:
+            raise McDevAuthError("未配置 MCDEV_COOKIE，无法访问开发者平台")
+        client = await self._http()
+        try:
+            resp = await client.post(path, json=json_body or {})
+        except httpx.HTTPError as exc:
+            raise McDevError(f"请求 {path} 失败：{exc}") from exc
+        return self._decode(resp, path)
+
+    def _decode(self, resp, path: str) -> dict:
         if resp.status_code in (401, 403):
             raise McDevAuthError("登录态已失效，请更新 MCDEV_COOKIE")
         if resp.status_code == 404:
@@ -288,6 +301,84 @@ class McDevClient:
         """items/categories/{cate}/{id}/incomes/ —— 单个作品收益明细。"""
         data = await self._get(f"items/categories/{self._cate}/{item_id}/incomes/")
         return self._rows(data)
+
+    # ------------------------------------------------------------------
+    # 玩家反馈 / 退款
+    # ------------------------------------------------------------------
+    async def get_feedback_list(self, span: int = 50) -> List[dict]:
+        """items/feedback/pe/ —— 玩家反馈列表（含回复状态、模组、内容）。"""
+        key = f"feedback:{span}"
+        cached = self._cached(key)
+        if cached is None:
+            data = await self._get("items/feedback/pe/", {"start": 0, "span": span})
+            cached = self._rows(data)
+            self._store(key, cached)
+        return cached
+
+    async def get_refund_reasons(self, start: str = "", end: str = "", span: int = 200) -> List[dict]:
+        """data_analysis/refund_reason/ —— 退款账单（含模组、退款日期、退款原因）。"""
+        params = {"start": 0, "span": span}
+        if start:
+            params["start_date"] = start
+        if end:
+            params["end_date"] = end
+        key = f"refund:{start}:{end}:{span}"
+        cached = self._cached(key)
+        if cached is None:
+            data = await self._get("data_analysis/refund_reason/", params)
+            cached = self._rows(data)
+            self._store(key, cached)
+        return cached
+
+    # ------------------------------------------------------------------
+    # 活动（征集 / 折扣特卖 / 优惠券 / 官方联动）
+    # ------------------------------------------------------------------
+    async def get_review_activities(self, span: int = 50) -> List[dict]:
+        """activities/pe-review-activities/ —— 模组征集（评审）活动列表。"""
+        data = await self._get("activities/pe-review-activities/", {"start": 0, "span": span})
+        return self._rows(data)
+
+    async def get_discount_activity(self) -> dict:
+        """activities/discount_activities/current/ —— 当前折扣特卖活动。"""
+        data = await self._get("activities/discount_activities/current/")
+        return data.get("data", data) if isinstance(data, dict) else {}
+
+    async def get_coupon_activity(self) -> List[dict]:
+        """activities/coupon_activities/current/ —— 当前优惠券活动。"""
+        data = await self._get("activities/coupon_activities/current/")
+        rows = data.get("coupon_activities") if isinstance(data, dict) else None
+        return rows if isinstance(rows, list) else []
+
+    async def get_joint_activity(self) -> List[dict]:
+        """items/categories/pe/get_joint_activity —— 官方联动活动。"""
+        data = await self._get("items/categories/pe/get_joint_activity")
+        return self._rows(data)
+
+    # ------------------------------------------------------------------
+    # 周末秒杀
+    # ------------------------------------------------------------------
+    async def get_flashsale_quota(self, dates: Sequence[str]) -> dict:
+        """items/apply_flashsale_num —— 查询各候选日期的秒杀名额占用。
+
+        返回 ``{"daily_quota": int, "res_info": {date: used}}``。
+        """
+        if not dates:
+            return {"daily_quota": 0, "res_info": {}}
+        data = await self._post("items/apply_flashsale_num", {"date": ",".join(dates)})
+        return data if isinstance(data, dict) else {}
+
+    async def get_flashsale_history(self) -> List[dict]:
+        """items/apply_flashsale_history —— 秒杀申请历史。"""
+        data = await self._post("items/apply_flashsale_history", {})
+        rows = data.get("res_info") if isinstance(data, dict) else None
+        return rows if isinstance(rows, list) else []
+
+    async def apply_flashsale(self, item_id: str, date: str, num: int = 1000) -> dict:
+        """items/apply_flashsale —— 提交周末秒杀申请（会改变平台状态）。"""
+        return await self._post(
+            "items/apply_flashsale",
+            {"item_id": item_id, "date": date, "flashsale_num": int(num)},
+        )
 
 
 __all__ = ["McDevClient", "McDevError", "McDevAuthError"]

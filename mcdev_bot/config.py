@@ -126,10 +126,16 @@ class Settings:
 
     push_enabled: bool = False
     push_chart: bool = True
-    push_split: bool = True      # 推送时附带团队贡献值分成（含 @）
+    push_split: bool = True      # 推送时附带团队贡献值分成（不 @ 成员）
     push_targets: List[str] = None  # type: ignore[assignment]
     push_hours: List[int] = None  # type: ignore[assignment]
     push_minute: int = 0
+
+    # 新活动监控（模组征集 / 折扣特卖）：发现新活动自动推送到群
+    activity_watch: bool = True
+    activity_check_hours: List[int] = None  # type: ignore[assignment]
+    activity_check_minute: int = 5
+    activity_targets: List[str] = None  # type: ignore[assignment]
 
     # ---- 派生属性 ----
     @property
@@ -187,6 +193,14 @@ class Settings:
             hours = [_env_int("MCDEV_PUSH_HOUR", 9)]
         self.push_hours = sorted({h for h in hours if 0 <= h <= 23})
         self.push_minute = _env_int("MCDEV_PUSH_MINUTE", 0)
+
+        self.activity_watch = _env_bool("MCDEV_ACTIVITY_WATCH", True)
+        act_hours = _env_int_list("MCDEV_ACTIVITY_HOURS") or [9, 15, 21]
+        self.activity_check_hours = sorted({h for h in act_hours if 0 <= h <= 23})
+        self.activity_check_minute = _env_int("MCDEV_ACTIVITY_MINUTE", 5)
+        self.activity_targets = _env_list("MCDEV_ACTIVITY_TARGETS") or list(
+            self.push_targets or []
+        )
 
         if not self.base_url.endswith("/"):
             self.base_url += "/"

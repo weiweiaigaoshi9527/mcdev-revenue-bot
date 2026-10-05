@@ -37,6 +37,17 @@ HELP_TEXT = """我的世界开发者收益助手 · 使用说明
 · 趋势 [天数]            最近 N 天每日收益明细
 · 分成 [月数]            官方结算（真实）+ 团队贡献值分成（@成员）+ 规则推算（参考）
 · 结算                   查看平台官方结算单（当月收益/鼓励/税费等真实数值）
+· 余额 / 钱包            账户余额：我的收益 / 未提取收益 / 结算方式 / 收款账户
+· 反馈                   玩家反馈列表（内容 / 时间 / 处理状态）
+· 退款反馈               玩家退款反馈（退款账单明细）
+· 退款账单 [天数]        所有退款账单 + 退款率
+· 数据 / 运营 [天数]     日活 / 组件涨粉 / 人均游玩时长 / 退款率
+· 活动                   作品活动：模组征集 / 折扣特卖
+· 新活动                 检查是否有新的模组征集活动
+· 秒杀                   可参与周末秒杀的日期与名额
+· 秒杀记录               我的秒杀申请记录
+· 秒杀申请 日期 作品ID   提交周末秒杀申请（仅群主/管理员）
+· 作品ID                 列出账号内作品的 ID（发给群成员用）
 · 成员                   查看本群成员及 QQ 号（标出团队成员）
 · 推送测试 [目标]        立即执行一次推送，预览推送效果
 · 状态                   检查开发者平台登录状态
@@ -112,6 +123,23 @@ def _range_text(start: str, end: str) -> str:
     if start == end:
         return start
     return f"{start} ~ {end}"
+
+
+def _clip(text, limit: int) -> str:
+    """截断过长文本，超出部分以省略号结尾。"""
+    s = str(text or "").strip().replace("\n", " ")
+    s = " ".join(s.split())
+    return s if len(s) <= limit else s[: max(limit - 1, 0)] + "…"
+
+
+def _fmt_day(value) -> str:
+    """把 YYYYMMDD 或 ISO 时间统一成 YYYY-MM-DD。"""
+    s = str(value or "").strip()
+    if len(s) >= 10 and s[4] == "-":
+        return s[:10]
+    if len(s) >= 8 and s[:8].isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s
 
 
 def render_overview(ov: Overview, days: int) -> str:
@@ -409,6 +437,294 @@ def render_settlement(records: List[Settlement], title: str = "我的世界开�
     return "\n".join(lines)
 
 
+# 结算状态文案（取自开发者平台前端 renderStatus 映射）
+SETTLE_STATUS_LABEL = {
+    "init": "未结算",
+    "preparing": "准备发票中",
+    "fail": "结算失败",
+    "applying": "结算中",
+    "pay_success": "已打款",
+    "pay_fail": "打款失败",
+}
+
+# 结算方式文案（取自开发者平台前端 billType 映射）
+PAY_TYPE_LABEL = {
+    "individual_withhold": "个人开发者代扣代缴",
+    "individual_owned": "个人开发者自备税票",
+    "company_owned": "公司开发者自备税票",
+}
+
+
+def render_balance(
+    data: Dict[str, object],
+    title: str = "我的世界开发者收益 · 账户余额",
+) -> str:
+    """账户余额（平台 ``users/me`` 口径，真实数值）。"""
+
+    def rmb(key: str) -> str:
+        try:
+            return f"{float(data.get(key) or 0):,.2f}"
+        except (TypeError, ValueError):
+            return "0.00"
+
+    def num(key: str) -> int:
+        try:
+            return int(data.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    lines = [
+        title,
+        _platform_title(),
+        "",
+        f"我的收益：￥{rmb('income_rmb')} 元",
+        f"未提取收益：￥{rmb('unextract_rmb')} 元",
+    ]
+
+    pay_type = str(data.get("pay_type") or "")
+    pay_label = PAY_TYPE_LABEL.get(pay_type, pay_type)
+    if pay_label:
+        lines.append(f"结算方式：{pay_label}")
+
+    bank = str(data.get("bank") or "")
+    card_no = str(data.get("card_no") or "")
+    if bank or card_no:
+        lines.append(f"收款账户：{bank}　{card_no}".rstrip())
+
+    deposit = rmb("deposit")
+    incentive = rmb("incentive_fund")
+    if float(str(data.get("deposit") or 0) or 0) > 0:
+        lines.append(f"保证金：￥{deposit} 元")
+    if float(str(data.get("incentive_fund") or 0) or 0) > 0:
+        lines.append(f"当月鼓励金：￥{incentive} 元")
+
+    lines.append("")
+
+    last_month = str(data.get("last_month") or "")
+    if last_month:
+        status = str(data.get("last_status") or "")
+        status_label = SETTLE_STATUS_LABEL.get(status, status)
+        line = f"最近出账：{last_month}　￥{rmb('last_income')} 元"
+        if status_label:
+            line += f"（{status_label}）"
+        lines.append(line)
+        lines.append(
+            f"结算单累计：￥{rmb('settled_rmb')} 元（{num('settled_count')} 个月）"
+        )
+    else:
+        lines.append("暂无官方结算记录（平台通常于次月 10 日左右出账）。")
+
+    total_diamond = num("total_diamond")
+    if total_diamond:
+        lines.append(f"累计消耗钻石：{fmt_int(total_diamond)}")
+
+    lines.append("")
+    lines.append("「我的收益 / 未提取收益」取自开发者平台账号信息，为平台真实数值")
+    return "\n".join(lines)
+
+
+# 玩家反馈状态文案
+FEEDBACK_STATUS_LABEL = {
+    0: "待处理",
+    1: "已回复",
+    2: "已关闭",
+    "0": "待处理",
+    "1": "已回复",
+    "2": "已关闭",
+}
+
+# 秒杀申请状态文案（取自开发者平台前端 flashsaleStatus）
+FLASHSALE_STATUS_LABEL = {
+    0: "审核中",
+    1: "已通过",
+    2: "未通过",
+    3: "取消申请",
+    4: "已下架",
+    5: "已上架",
+}
+
+
+def render_feedback(items: List[Dict[str, object]], top_n: int = 8) -> str:
+    """玩家反馈列表。"""
+    lines = [
+        "我的世界开发者收益 · 玩家反馈",
+        _platform_title(),
+        "",
+    ]
+    if not items:
+        lines.append("暂无玩家反馈。")
+        return "\n".join(lines)
+
+    lines.append(f"共 {len(items)} 条，最近 {min(top_n, len(items))} 条：")
+    for it in items[:top_n]:
+        status = it.get("status")
+        label = FEEDBACK_STATUS_LABEL.get(status, str(status) if status is not None else "")
+        head = f"· {it.get('item_name') or '未知作品'}"
+        if label:
+            head += f"［{label}］"
+        lines.append(head)
+        content = str(it.get("content") or "").strip()
+        if content:
+            lines.append(f"  {_clip(content, 60)}")
+        when = str(it.get("create_time") or "")
+        if when:
+            lines.append(f"  时间：{when}")
+    return "\n".join(lines)
+
+
+def render_refund(
+    data: Dict[str, object],
+    top_n: int = 10,
+    title: str = "我的世界开发者收益 · 退款账单",
+) -> str:
+    """退款账单 + 退款率。"""
+    count = int(data.get("count") or 0)
+    sold = int(data.get("sold") or 0)
+    rate = data.get("rate")
+
+    lines = [
+        title,
+        _platform_title(),
+        "",
+        f"退款笔数：{fmt_int(count)}",
+        f"同期成交：{fmt_int(sold)} 笔",
+    ]
+    if rate is None:
+        lines.append("退款率：—（缺成交数据）")
+    else:
+        lines.append(f"退款率：{fmt_float(rate)}%")
+
+    by_item = data.get("by_item") or []
+    if by_item:
+        lines.append("")
+        lines.append("按作品：")
+        for name, n in list(by_item)[:top_n]:
+            lines.append(f"· {_clip(str(name), 22)}：{fmt_int(n)} 笔")
+
+    bills = data.get("bills") or []
+    if bills:
+        lines.append("")
+        lines.append(f"最近 {min(top_n, len(bills))} 条明细：")
+        for b in bills[:top_n]:
+            when = _fmt_day(str(b.get("refund_time") or ""))
+            reason = str(b.get("reason") or "未填")
+            lines.append(
+                f"· {when}　{_clip(str(b.get('item_name') or ''), 16)}\n"
+                f"  原因：{_clip(reason, 40)}"
+            )
+    else:
+        lines.append("")
+        lines.append("暂无退款记录。")
+    return "\n".join(lines)
+
+
+def render_analytics(data: Dict[str, object], top_n: int = 6) -> str:
+    """运营数据：日活 / 组件涨粉 / 人均游玩时长 / 退款率。"""
+    lines = [
+        "我的世界开发者收益 · 运营数据",
+        _platform_title(),
+        f"统计区间：{data.get('start_date')} ~ {data.get('end_date')}"
+        f"（{data.get('days')} 天）",
+        "",
+        f"日均日活：{fmt_float(data.get('dau_avg'), 1)}",
+        f"组件涨粉：{fmt_int(data.get('focus_total'))}",
+        f"人均游玩时长：{fmt_float(data.get('play_avg'), 1)} 分钟",
+        f"退款率：{fmt_float(data.get('refund_rate'))}%",
+    ]
+
+    items = data.get("items") or []
+    if items:
+        lines.append("")
+        lines.append("按作品（日均日活排序）：")
+        for it in items[:top_n]:
+            lines.append(
+                f"· {_clip(str(it.get('name') or ''), 20)}\n"
+                f"  日均日活 {fmt_float(it.get('dau_avg'), 1)}　"
+                f"涨粉 {fmt_int(it.get('focus'))}　"
+                f"时长 {fmt_float(it.get('play_avg'), 1)} 分　"
+                f"退款率 {fmt_float(it.get('refund_rate'))}%"
+            )
+    return "\n".join(lines)
+
+
+def render_activities(data: Dict[str, object], top_n: int = 5) -> str:
+    """作品活动 / 折扣特卖 / 模组征集。"""
+    lines = ["我的世界开发者收益 · 活动中心", _platform_title(), ""]
+
+    active = data.get("active")
+    review = data.get("review") or []
+    shown = active if active is not None else review
+
+    lines.append(f"进行中／待开始活动：{len(shown)} 个（历史累计 {len(review)} 个）")
+    if shown:
+        for a in shown[:top_n]:
+            lines.append(f"· {a.get('name') or '未命名活动'}")
+            if a.get("apply_end_at"):
+                lines.append(f"  报名截止：{a.get('apply_end_at')}")
+            if a.get("begin_at") or a.get("end_at"):
+                lines.append(f"  活动时间：{a.get('begin_at')} ~ {a.get('end_at')}")
+            desc = str(a.get("desc") or "").strip()
+            if desc:
+                lines.append(f"  {_clip(desc, 100)}")
+    else:
+        lines.append("（暂无进行中的征集活动）")
+
+    discount = data.get("discount") or {}
+    lines.append("")
+    if discount:
+        lines.append(f"折扣特卖：{discount.get('name') or '进行中'}")
+        if discount.get("begin_at") or discount.get("end_at"):
+            lines.append(f"  活动时间：{discount.get('begin_at')} ~ {discount.get('end_at')}")
+        instr = str(discount.get("instruction") or "").strip()
+        desc = str(discount.get("desc") or "").strip()
+        text = instr if len(instr) > len(desc) else desc
+        if text and text != "/":
+            lines.append(f"  {_clip(text, 150)}")
+    else:
+        lines.append("折扣特卖：暂无进行中的活动")
+    return "\n".join(lines)
+
+
+def render_flashsale(data: Dict[str, object], top_n: int = 12) -> str:
+    """可参与周末秒杀的日期。"""
+    lines = [
+        "我的世界开发者收益 · 周末秒杀可申请日期",
+        _platform_title(),
+        f"今天：{data.get('today')}　可申请窗口：{data.get('window')}",
+        f"每日名额上限：{fmt_int(data.get('quota'))}",
+        "",
+    ]
+    dates = data.get("dates") or []
+    if not dates:
+        lines.append("当前窗口内暂无可申请日期。")
+        return "\n".join(lines)
+
+    for d in dates[:top_n]:
+        tag = "已满" if d.get("full") else f"剩余 {fmt_int(d.get('left'))}"
+        lines.append(f"· {d.get('label')}　已用 {fmt_int(d.get('used'))}／{tag}")
+    lines.append("")
+    lines.append("申请方式：管理员/群主发送「秒杀申请 日期 模组ID」")
+    return "\n".join(lines)
+
+
+def render_flashsale_history(items: List[Dict[str, object]], top_n: int = 10) -> str:
+    """秒杀申请历史。"""
+    lines = ["我的世界开发者收益 · 秒杀申请记录", _platform_title(), ""]
+    if not items:
+        lines.append("暂无秒杀申请记录。")
+        return "\n".join(lines)
+    for it in items[:top_n]:
+        st = it.get("status")
+        label = FLASHSALE_STATUS_LABEL.get(st, str(st) if st is not None else "")
+        when = _fmt_day(str(it.get("date") or ""))
+        lines.append(f"· {when}　{_clip(str(it.get('item_name') or ''), 18)}")
+        lines.append(
+            f"  限量 {fmt_int(it.get('num'))}　单价 {fmt_int(it.get('price'))} 钻石"
+            f"　［{label}］"
+        )
+    return "\n".join(lines)
+
+
 __all__ = [
     "HELP_TEXT",
     "fmt_int",
@@ -427,5 +743,12 @@ __all__ = [
     "render_income",
     "render_income_summary",
     "render_settlement",
+    "render_balance",
+    "render_feedback",
+    "render_refund",
+    "render_analytics",
+    "render_activities",
+    "render_flashsale",
+    "render_flashsale_history",
     "partner_lines",
 ]
