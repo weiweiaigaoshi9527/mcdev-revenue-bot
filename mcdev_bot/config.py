@@ -142,6 +142,9 @@ class Settings:
     qq_secret: str = ""
     qq_sandbox: bool = False
     qq_admins: List[str] = None  # type: ignore[assignment]  管理员 openid，用于秒杀申请
+    # 官方群聊主动消息有硬性配额（平台限制：每群每月 4 条），因此默认关闭定时推送
+    qq_push_enabled: bool = False
+    qq_push_max_per_month: int = 4
 
     # ---- 派生属性 ----
     @property
@@ -212,6 +215,8 @@ class Settings:
         self.qq_secret = _env("QQ_BOT_SECRET")
         self.qq_sandbox = _env_bool("QQ_BOT_SANDBOX", False)
         self.qq_admins = _env_list("QQ_BOT_ADMINS")
+        self.qq_push_enabled = _env_bool("QQ_BOT_PUSH_ENABLED", False)
+        self.qq_push_max_per_month = max(1, _env_int("QQ_BOT_PUSH_MAX_PER_MONTH", 4))
 
         if not self.base_url.endswith("/"):
             self.base_url += "/"

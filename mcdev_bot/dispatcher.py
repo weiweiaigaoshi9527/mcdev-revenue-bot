@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import List, Optional
 
 from . import chart
-from .config import settings
+from .config import PROJECT_ROOT, settings
 from .formatter import (
     HELP_TEXT,
     fmt_int,
@@ -41,9 +43,13 @@ from .formatter import (
 from .revenue import split_among_partners
 from .service import RevenueService, build_client
 
-# 官方群聊里不适合出现的指令（需要群成员列表 / 定时推送等）
+# 官方群聊里语义不同的指令，单独说明
 QQ_HELP_EXTRA = """
-【本机器人由官方 QQ 机器人接入，@机器人 即可使用】
+【官方 QQ 机器人专属说明】
+· 成员                  查看你的 openid（官方接口不提供群成员列表）
+· 推送测试              预览一条推送内容（官方机器人定时推送受平台配额限制）
+
+【使用方式】群里 @机器人 或私聊机器人发送指令即可。
 """
 
 _service: Optional[RevenueService] = None
@@ -72,12 +78,10 @@ class Reply:
 
 
 def _help_text() -> str:
-    """帮助文本（官方机器人版：去掉 成员 / 推送测试）。"""
+    """帮助文本（官方机器人版：成员 / 推送测试 语义不同，改由 QQ_HELP_EXTRA 说明）。"""
     lines = []
     for line in HELP_TEXT.splitlines():
-        if "成员" in line and "查看本群成员" in line:
-            continue
-        if "推送测试" in line:
+        if "查看本群成员" in line or "推送测试" in line:
             continue
         lines.append(line)
     return "\n".join(lines) + QQ_HELP_EXTRA
@@ -251,6 +255,160 @@ async def _cmd_status() -> Reply:
         return Reply(text=render_status(False, error=str(exc)))
 
 
+# ----------------------------------------------------------------------
+# 新活动检查（与 NapCat 方案共用 .cache/activities.json 基线）
+# ----------------------------------------------------------------------
+def _activity_state_path() -> Path:
+    cache = Path(PROJECT_ROOT) / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache / "activities.json"
+
+
+def _load_seen_activities() -> set:
+    try:
+        data = json.loads(_activity_state_path().read_text(encoding="utf-8"))
+        return set(data.get("seen") or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _save_seen_activities(seen: set) -> None:
+    try:
+        _activity_state_path().write_text(
+            json.dumps({"seen": sorted(seen)}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def render_activity_detail(items: List[dict]) -> str:
+    """把活动列表渲染成完整文本（推送与「新活动」指令共用）。"""
+    lines = ["【新活动】我的世界开发者 模组征集 / 特卖活动", ""]
+    for a in items:
+        lines.append(f"■ {a.get('name') or '未命名活动'}")
+        if a.get("apply_end_at"):
+            lines.append(f"报名截止：{a.get('apply_end_at')}")
+        if a.get("begin_at") or a.get("end_at"):
+            lines.append(f"活动时间：{a.get('begin_at')} ~ {a.get('end_at')}")
+        desc = str(a.get("desc") or "").strip()
+        if desc:
+            lines.append(desc)
+        instr = str(a.get("instruction") or "").strip()
+        if instr and instr != desc:
+            lines.append(f"活动说明：{instr}")
+        modules = a.get("modules") or []
+        if modules:
+            names = "、".join(
+                str(m.get("module_name") or "") for m in modules if m.get("module_name")
+            )
+            if names:
+                lines.append(f"可参与模块：{names}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+async def _cmd_activity_check() -> Reply:
+    svc = get_service()
+    data = await svc.activities()
+    review = data.get("review") or []
+    seen = _load_seen_activities()
+
+    # 首次运行只建立基线，避免把历史活动全部当成新活动
+    if not seen:
+        _save_seen_activities({a["id"] for a in review if a.get("id")})
+        return Reply(
+            text=f"已建立活动基线，共记录 {len(review)} 个活动。\n"
+            "之后发送「新活动」即可查看新增的模组征集活动。"
+        )
+
+    fresh = [a for a in review if a.get("id") and a["id"] not in seen]
+    if not fresh:
+        return Reply(text="当前没有新活动。")
+    _save_seen_activities(seen | {a["id"] for a in fresh})
+    return Reply(text=render_activity_detail(fresh))
+
+
+# ----------------------------------------------------------------------
+# 推送内容（「推送测试」预览 + 官方机器人定时推送共用）
+# ----------------------------------------------------------------------
+async def build_push_reply() -> Reply:
+    """构建一条推送：最新一日收益 + 预计实际收益与团队分成 + 收益看板图。"""
+    svc = get_service()
+    # 平台数据有发布延迟，取「最近一个有数据的日期」，避免刚过零点推成全 0
+    ov = await svc.latest_available()
+    yesterday_str = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    title = (
+        "我的世界开发者收益 · 昨日"
+        if ov.end_date == yesterday_str
+        else "我的世界开发者收益 · 最新可用数据"
+    )
+    parts = [render_yesterday(ov, title=title)]
+
+    if settings.push_split and settings.partners:
+        summary = None
+        try:
+            summary = await svc.income_summary(months=settings.split_months)
+        except Exception:  # noqa: BLE001
+            pass
+        if summary:
+            settled = float(summary.get("settled_rmb") or 0)
+            pending = float(summary.get("pending_rmb") or 0)
+            total = float(summary.get("total_rmb") or 0)
+            settled_months = "、".join(summary.get("settled_months") or []) or "无"
+            pending_months = "、".join(summary.get("pending_months") or []) or "无"
+            parts.append(
+                "—— 预计实际收益 ——\n"
+                f"官方已结算：{settled:,.2f} 元（{settled_months}）\n"
+                f"未结算预估：{pending:,.2f} 元（{pending_months}）\n"
+                f"合计：{total:,.2f} 元"
+            )
+            if total > 0:
+                shares = split_among_partners(int(round(total * 100)), settings.partners)
+                parts.append(f"—— 团队分成（按预计实际收益 {total:,.2f} 元）——")
+                parts.extend(partner_lines(shares))
+
+    image = None
+    caption = ""
+    if settings.push_chart and await _charts_on():
+        try:
+            rows = await svc.trend_daily()
+            board = await svc.trend_overview()
+            image = await _png(chart.render_dashboard, board, rows, settings.chart_top_n)
+            caption = f"收益看板｜{board.start_date} ~ {board.end_date}"
+        except Exception:  # noqa: BLE001
+            image = None
+    return Reply(text="\n\n".join(parts), image=image, caption=caption)
+
+
+async def _cmd_pushtest() -> Reply:
+    reply = await build_push_reply()
+    reply.text = "【推送预览】以下为定时推送的内容示例\n\n" + reply.text
+    return reply
+
+
+# ----------------------------------------------------------------------
+# 成员（官方接口不提供群成员列表，改为给出 openid）
+# ----------------------------------------------------------------------
+async def _cmd_members(sender: str) -> Reply:
+    lines = [
+        "我的世界开发者收益 · 成员",
+        "",
+        "官方 QQ 机器人接口不提供群成员列表（消息里只有发送者的 openid），",
+        "所以无法像 NapCat 方案那样列出全部群成员。",
+        "",
+    ]
+    if sender:
+        lines.append(f"你的 openid：{sender}")
+        lines.append("")
+        lines.append(
+            "把需要执行「秒杀申请」的人填进 .env 的 QQ_BOT_ADMINS（逗号分隔）即可。"
+        )
+    else:
+        lines.append("未能获取你的 openid，请稍后重试。")
+    return Reply(text="\n".join(lines))
+
+
 async def _cmd_flashsale_apply(raw_date: str, item_id: str, num: int, is_admin: bool) -> Reply:
     if not is_admin:
         return Reply(text="仅群主或管理员可以提交秒杀申请。")
@@ -325,34 +483,51 @@ async def _cmd_monthly_chart(months: int) -> Reply:
 # ----------------------------------------------------------------------
 _COMMANDS = {
     "收益": "overview", "总览": "overview", "overview": "overview", "sy": "overview",
-    "地图": "maps", "地图收益": "maps", "作品": "maps", "maps": "maps",
-    "昨日": "yesterday", "yesterday": "yesterday",
-    "日均": "daily", "daily": "daily",
-    "月报": "monthly", "月度": "monthly", "monthly": "monthly",
-    "趋势": "trend", "trend": "trend",
+    "地图": "maps", "地图收益": "maps", "作品": "maps", "maps": "maps", "map": "maps",
+    "昨日": "yesterday", "yesterday": "yesterday", "zuori": "yesterday",
+    "日均": "daily", "daily": "daily", "rijun": "daily",
+    "月报": "monthly", "月度": "monthly", "monthly": "monthly", "yuebao": "monthly",
+    "趋势": "trend", "trend": "trend", "qushi": "trend",
     "余额": "balance", "钱包": "balance", "balance": "balance",
+    "账户余额": "balance", "余额查询": "balance", "wallet": "balance",
     "结算": "settlement", "官方结算": "settlement", "settlement": "settlement",
+    "收益结算": "settlement", "结算单": "settlement",
     "反馈": "feedback", "玩家反馈": "feedback", "feedback": "feedback",
     "退款反馈": "refund_feedback", "玩家退款反馈": "refund_feedback",
     "退款账单": "refund", "退款": "refund", "退款率": "refund", "refund": "refund",
-    "数据": "analytics", "运营": "analytics", "日活": "analytics", "analytics": "analytics",
-    "活动": "activities", "作品活动": "activities", "折扣特卖": "activities", "征集": "activities",
-    "秒杀": "flashsale", "周末秒杀": "flashsale",
+    "退款明细": "refund",
+    "数据": "analytics", "运营": "analytics", "日活": "analytics",
+    "analytics": "analytics", "运营数据": "analytics", "dau": "analytics",
+    "活动": "activities", "作品活动": "activities", "折扣特卖": "activities",
+    "征集": "activities", "特卖": "activities",
+    "新活动": "activity_check", "活动检查": "activity_check",
+    "checkactivity": "activity_check",
+    "秒杀": "flashsale", "周末秒杀": "flashsale", "秒杀日期": "flashsale",
     "秒杀记录": "flashsale_log", "秒杀历史": "flashsale_log",
+    "秒杀申请记录": "flashsale_log",
     "秒杀申请": "flashsale_apply", "申请秒杀": "flashsale_apply",
+    "flashsaleapply": "flashsale_apply",
     "作品ID": "items_id", "模组ID": "items_id", "作品id": "items_id",
+    "itemid": "items_id", "ids": "items_id",
     "分成": "income", "实际收益": "income", "到账": "income", "income": "income",
-    "状态": "status", "status": "status",
+    "收益分成": "income", "split": "income",
+    "成员": "members", "群成员": "members", "members": "members",
+    "推送测试": "pushtest", "测试推送": "pushtest", "pushtest": "pushtest",
+    "状态": "status", "status": "status", "zhuangtai": "status",
     "帮助": "help", "help": "help", "说明": "help",
-    "图表": "dashboard", "收益图": "dashboard", "看板": "dashboard", "dashboard": "dashboard",
-    "排行图": "rank_chart", "地图图": "rank_chart",
-    "趋势图": "trend_chart",
-    "月报图": "monthly_chart", "月度图": "monthly_chart",
+    "图表": "dashboard", "收益图": "dashboard", "看板": "dashboard",
+    "dashboard": "dashboard", "chart": "dashboard",
+    "排行图": "rank_chart", "地图图": "rank_chart", "rankchart": "rank_chart",
+    "趋势图": "trend_chart", "trendchart": "trend_chart",
+    "月报图": "monthly_chart", "月度图": "monthly_chart", "monthchart": "monthly_chart",
 }
 
 
-async def handle(text: str, *, is_admin: bool = False) -> Reply:
-    """把一条指令文本转成回复。未知指令返回帮助。"""
+async def handle(text: str, *, is_admin: bool = False, sender: str = "") -> Reply:
+    """把一条指令文本转成回复。未知指令返回帮助。
+
+    ``is_admin`` 用于「秒杀申请」鉴权；``sender`` 为发送者 openid（「成员」指令用）。
+    """
     raw = (text or "").strip()
     if not raw:
         return Reply(text=_help_text())
@@ -390,6 +565,12 @@ async def handle(text: str, *, is_admin: bool = False) -> Reply:
             return await _cmd_analytics(_parse_int(rest, 7))
         if action == "activities":
             return await _cmd_activities()
+        if action == "activity_check":
+            return await _cmd_activity_check()
+        if action == "members":
+            return await _cmd_members(sender)
+        if action == "pushtest":
+            return await _cmd_pushtest()
         if action == "flashsale":
             return await _cmd_flashsale()
         if action == "flashsale_log":
@@ -449,4 +630,12 @@ async def warmup() -> None:
         pass
 
 
-__all__ = ["Reply", "handle", "get_service", "reset_service", "warmup"]
+__all__ = [
+    "Reply",
+    "handle",
+    "get_service",
+    "reset_service",
+    "warmup",
+    "build_push_reply",
+    "render_activity_detail",
+]
