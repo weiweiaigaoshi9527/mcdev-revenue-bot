@@ -137,6 +137,12 @@ class Settings:
     activity_check_minute: int = 5
     activity_targets: List[str] = None  # type: ignore[assignment]
 
+    # 官方 QQ 机器人（QQ 开放平台）
+    qq_appid: str = ""
+    qq_secret: str = ""
+    qq_sandbox: bool = False
+    qq_admins: List[str] = None  # type: ignore[assignment]  管理员 openid，用于秒杀申请
+
     # ---- 派生属性 ----
     @property
     def push_hours_expr(self) -> str:
@@ -201,6 +207,11 @@ class Settings:
         self.activity_targets = _env_list("MCDEV_ACTIVITY_TARGETS") or list(
             self.push_targets or []
         )
+
+        self.qq_appid = _env("QQ_BOT_APPID")
+        self.qq_secret = _env("QQ_BOT_SECRET")
+        self.qq_sandbox = _env_bool("QQ_BOT_SANDBOX", False)
+        self.qq_admins = _env_list("QQ_BOT_ADMINS")
 
         if not self.base_url.endswith("/"):
             self.base_url += "/"

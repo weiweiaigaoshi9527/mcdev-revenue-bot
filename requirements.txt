@@ -1,4 +1,8 @@
 # ---- QQ 机器人框架 ----
+# 方案 A（推荐）：官方 QQ 机器人，无需挂 QQ 客户端
+qq-botpy>=1.2.0
+
+# 方案 B：NoneBot2 + OneBot v11（NapCat），需要常驻 QQ 客户端
 # [fastapi] 额外依赖提供默认驱动，用于接收 OneBot 的连接
 nonebot2[fastapi]>=2.3.0
 nonebot-adapter-onebot>=2.4.0

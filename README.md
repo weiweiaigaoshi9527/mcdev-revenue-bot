@@ -1,10 +1,44 @@
 # 我的世界开发者收益 QQ 机器人
 
-基于 **NoneBot2 + OneBot v11** 的 QQ 机器人，接入《我的世界》中国版**开发者平台**
+接入《我的世界》中国版**开发者平台**
 （https://mcdev.webapp.163.com/ ，接口基址 `mc-launcher.webapp.163.com`），可在 QQ 里
-随时查询开发者账号下**各个地图（作品）的钻石收益、销量**，以及**日均 / 昨日 / 各月钻石收益**。
+随时查询开发者账号下**各个作品（地图）的钻石收益、销量**，以及**日均 / 昨日 / 各月钻石收益**、
+退款账单、运营数据、活动与周末秒杀等。
 
 > 未配置登录 Cookie 时会自动进入**演示模式**，用示例数据跑通全部指令，方便先看效果。
+
+---
+
+## 零、两种接入方式（二选一）
+
+| | **方案 A：官方 QQ 机器人**（推荐） | 方案 B：NoneBot + NapCat |
+| --- | --- | --- |
+| 要不要挂 QQ 客户端 | **不要** | 要（需常驻电脑/手机/服务器上的 QQ） |
+| 凭证 | AppID + AppSecret | 扫码登录 + 反向 WebSocket |
+| 交互方式 | 群里 **@机器人**、私聊机器人 | @机器人、私聊、命令前缀 |
+| 主动推送 | 受平台配额限制，**本项目不做** | 不受限（支持定时推送） |
+| 入口脚本 | `start-qq.bat` / `bot_qq.py` | `start.bat` / `bot.py` |
+| 依赖 | `qq-botpy` | `nonebot2` + `napcat` |
+
+**方案 A 只需三步：**
+
+1. 打开 [QQ 开放平台](https://q.qq.com/)，用 QQ 登录、完成开发者认证，创建一个机器人
+2. 在机器人「开发设置」里拿到 **AppID** 与 **AppSecret**，填入项目根目录 `.env`：
+
+   ```ini
+   QQ_BOT_APPID=你的AppID
+   QQ_BOT_SECRET=你的AppSecret
+   # 沙箱调试时打开
+   QQ_BOT_SANDBOX=false
+   # 允许执行「秒杀申请」的管理员 openid（可留空，日志里会提示你的 openid）
+   QQ_BOT_ADMINS=
+   ```
+
+3. 双击 **`start-qq.bat`** 启动（首次会自动装依赖）
+
+之后在群里 @机器人 发送 `帮助` 即可看到全部指令。
+
+> 官方机器人**不需要** `HOST` / `PORT`，也不会用到 NapCat；那部分配置只在方案 B 下生效。
 
 ---
 
@@ -33,8 +67,8 @@
 | `秒杀记录` | 我的秒杀申请记录 |
 | `秒杀申请 日期 作品ID` | **提交周末秒杀申请**（仅群主 / 管理员） |
 | `作品ID` | 列出账号内作品的 ID（可发给群成员用于秒杀申请） |
-| `成员` | 列出当前群成员与 QQ 号，并标出命中 `MCDEV_PARTNERS` 的成员 |
-| `推送测试 [目标]` | **立即执行一次推送**（预览效果），不传目标则用配置的 `MCDEV_PUSH_TARGETS` |
+| `成员` | 列出当前群成员与 QQ 号，并标出命中 `MCDEV_PARTNERS` 的成员（**仅方案 B**） |
+| `推送测试 [目标]` | **立即执行一次推送**（预览效果），不传目标则用配置的 `MCDEV_PUSH_TARGETS`（**仅方案 B**） |
 | `状态` | 检查开发者平台登录态 |
 | `帮助` | 使用说明 |
 
@@ -55,7 +89,7 @@
 （上图为演示数据渲染的收益看板）
 
 支持别名，例如 `总览 / overview / sy`、`图表 / 收益图 / 看板`、`月报图 / 月度图` 等。
-定时推送可通过 `.env` 开启，支持**每天多个时间点**（`MCDEV_PUSH_HOURS=10,12,14,16,18,20,22,0`），并可附带看板图片（`MCDEV_PUSH_CHART=true`）。
+（**方案 B**）定时推送可通过 `.env` 开启，支持**每天多个时间点**（`MCDEV_PUSH_HOURS=10,12,14,16,18,20,22,0`），并可附带看板图片（`MCDEV_PUSH_CHART=true`）。
 若运行环境未安装 matplotlib，图表指令会自动降级为文字输出，不影响机器人运行。
 
 钻石与人民币约 **1 元 = 100 钻石**，消息中会同时给出钻石数与折算金额。
@@ -66,8 +100,10 @@
 
 ```
 qqbot/
-├── bot.py                     # 机器人启动入口
-├── start.bat                  # Windows 一键启动（装依赖 + 启动机器人）
+├── bot_qq.py                  # 官方 QQ 机器人入口（推荐，无需 QQ 客户端）
+├── start-qq.bat               # 官方机器人一键启动（Windows）
+├── bot.py                     # NoneBot + NapCat 入口（方案 B）
+├── start.bat                  # 方案 B 一键启动（Windows）
 ├── requirements.txt
 ├── .env.example               # 配置模板（复制为 .env）
 ├── mcdev_bot/
@@ -75,12 +111,14 @@ qqbot/
 │   ├── models.py              # 数据模型（对应平台真实字段）
 │   ├── client.py              # 开发者平台接口客户端（真实数据）
 │   ├── mock.py                # 演示数据源（无 Cookie 时使用）
-│   ├── service.py             # 聚合：各地图/昨日/日均/月度
+│   ├── service.py             # 聚合：各地图/昨日/日均/月度/退款/运营/活动
 │   ├── revenue.py             # 2026 新版分成规则 + 团队贡献值拆分
 │   ├── profile.py             # 开发者昵称 / 头像（图表 logo）
 │   ├── chart.py               # 图表渲染（收益图片）
 │   ├── formatter.py           # QQ 文本排版
-│   └── plugins/revenue/       # NoneBot 指令插件
+│   ├── dispatcher.py          # 平台无关的指令分发层（两种接入共用）
+│   ├── qqbot_bot.py           # 官方 QQ 机器人客户端（qq-botpy）
+│   └── plugins/revenue/       # NoneBot 指令插件（方案 B）
 ├── tools/
 │   ├── probe.py               # 连通性自检（校验 Cookie 与接口）
 │   └── replay.py              # 本地预览全部指令回复（无需 QQ）
@@ -101,14 +139,73 @@ qqbot/
 
 ## 三、快速开始
 
-### 1. 安装依赖
+两种方式**共用同一套查询逻辑**（`mcdev_bot/dispatcher.py`），只有「接入端」不同，按需选一种即可。
+
+### 方案 A：官方 QQ 机器人（推荐，无需挂 QQ 客户端）
+
+#### A1. 安装依赖
 
 ```powershell
 cd C:\Users\weiwei\Documents\qqbot
 python -m pip install -r requirements.txt
 ```
 
-### 2. 部署 OneBot 实现（QQ 接入）
+只需 `qq-botpy`（已在 `requirements.txt` 中）。
+
+#### A2. 在 QQ 开放平台创建机器人
+
+1. 打开 [QQ 开放平台](https://q.qq.com/)，用 QQ 登录并完成开发者认证
+2. 创建机器人（类型选「群聊机器人」），进入「开发设置」页
+3. 复制 **AppID** 与 **AppSecret**
+
+#### A3. 配置 `.env`
+
+```powershell
+Copy-Item .env.example .env
+```
+
+编辑 `.env`，至少填写：
+
+```ini
+QQ_BOT_APPID=你的AppID
+QQ_BOT_SECRET=你的AppSecret
+QQ_BOT_SANDBOX=false          # 沙箱环境调试时改 true
+QQ_BOT_ADMINS=                # 允许执行「秒杀申请」的管理员 openid，可留空
+# 开发者平台凭证
+MCDEV_COOKIE=粘贴你的 Cookie
+MCDEV_PLATFORM=pe
+MCDEV_CHART_ENABLED=true
+```
+
+> 官方机器人**不需要** `HOST` / `PORT`，也用不到 NapCat。
+> 不知道自己的 openid？直接发一条 `秒杀申请` 指令，机器人会在日志里打印你的 openid。
+
+#### A4. 启动
+
+双击 **`start-qq.bat`**，或：
+
+```powershell
+python bot_qq.py
+```
+
+在群里 **@机器人** 发送 `帮助` 即可看到全部指令（私聊机器人同样可用）。
+
+> 官方机器人有**主动消息配额限制**，因此本项目**不提供定时推送**；
+> 需要定时推送请使用方案 B。图表指令（`图表` / `排行图` / `趋势图` / `月报图`）
+> 会以**图片消息**返回，同样可用。
+
+---
+
+### 方案 B：NoneBot + NapCat（支持定时推送）
+
+#### B1. 安装依赖
+
+```powershell
+cd C:\Users\weiwei\Documents\qqbot
+python -m pip install -r requirements.txt
+```
+
+#### B2. 部署 OneBot 实现（QQ 接入）
 
 本机器人通过 **OneBot v11** 协议与 QQ 通信，使用 **NapCatQQ**。
 
@@ -138,14 +235,14 @@ OneBot V11 的连接记录（含 bot 的 QQ 号）。
 > 若 NapCat 与机器人不在同一台机器，请把 `.env` 的 `HOST` 改为 `0.0.0.0`，
 > 并在 URL 中使用机器人所在机器的局域网 IP。
 
-### 3. 获取开发者平台 Cookie
+#### B3. 获取开发者平台 Cookie
 
 1. 浏览器登录开发者平台：https://mcdev.webapp.163.com/
 2. 按 `F12` 打开开发者工具 → **Network（网络）** 面板，刷新页面。
 3. 点击任意一个 `mc-launcher.webapp.163.com` 的请求 → **Headers → Request Headers → Cookie**。
 4. 复制 Cookie 的**完整值**（形如 `NTES_SESS=...; S_INFO=...; ...`）。
 
-### 4. 配置 `.env`
+#### B4. 配置 `.env`
 
 ```powershell
 Copy-Item .env.example .env
@@ -175,7 +272,7 @@ MCDEV_CHART_ENABLED=true
 
 只想统计「地图」类作品时，可设置 `MCDEV_ITEM_KEYWORD=地图` 做名称筛选。
 
-### 5. 自检、预览与启动
+#### B5. 自检、预览与启动
 
 ```powershell
 python tools/probe.py          # 校验 Cookie 与接口，并打印最近 7 天收益
@@ -191,7 +288,7 @@ python bot.py                  # 启动机器人
 > 全部打印出来，图表指令会把 PNG 存到 `preview/` 目录，方便在接入 QQ 前确认效果。
 > 常用参数：`--days 30` 指定天数，`--no-chart` 跳过图表。
 
-### 6. 部署为服务端（Windows / Linux / Android）
+#### B6. 部署为服务端（Windows / Linux / Android）
 
 同一套代码可作为服务端运行在三种平台上，差异只在「QQ 接入程序」与「进程守护方式」，
 反向 WS 地址统一为 `ws://127.0.0.1:8080/onebot/v11/ws`。

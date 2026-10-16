@@ -1,0 +1,34 @@
+# ============================================================
+#  我的世界开发者收益 QQ 机器人 —— systemd 服务单元
+#
+#  install.sh 会自动把 __APP_DIR__ / __USER__ 替换为真实值，
+#  也可以手动复制到 /etc/systemd/system/mcdev-bot.service 后修改。
+# ============================================================
+[Unit]
+Description=Minecraft Developer Revenue QQ Bot (NoneBot2)
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+
+# 中文日志与图表输出
+Environment=PYTHONIOENCODING=utf-8
+Environment=PYTHONUNBUFFERED=1
+# 若使用 matplotlib 无显示后端（服务器无桌面环境时更稳）
+Environment=MPLBACKEND=Agg
+
+ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/bot.py
+
+# 崩溃自动重启
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
