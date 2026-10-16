@@ -66,6 +66,11 @@ def main() -> None:
 
     asyncio.run(_warmup())
 
+    # botpy.Client 在构造时会取当前事件循环（Python 3.12 下 asyncio.run 结束后会置空），
+    # 因此这里显式新建并设置一个事件循环，供 client.run() 使用。
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     from mcdev_bot.qqbot_bot import build_client
 
     client = build_client()
