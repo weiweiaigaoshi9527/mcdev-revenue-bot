@@ -64,12 +64,14 @@ def main() -> None:
     print(" 使用方式 ：群里 @机器人 或私聊机器人，发送「帮助」查看指令", flush=True)
     print("============================================================", flush=True)
 
-    asyncio.run(_warmup())
-
-    # botpy.Client 在构造时会取当前事件循环（Python 3.12 下 asyncio.run 结束后会置空），
-    # 因此这里显式新建并设置一个事件循环，供 client.run() 使用。
+    # botpy.Client 在构造时会取「当前事件循环」（Python 3.12 下 asyncio.run 结束后会置空），
+    # 因此这里显式新建并设置一个循环，并让预热与 client.run() 共用同一个循环：
+    # 否则预热时建立的 HTTP 连接池会挂在已关闭的循环上，运行期报 "Event loop is closed"。
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    loop.run_until_complete(_warmup())
+    # 预热用的客户端不再复用，交给运行期在同一个循环里重建
+    dispatcher.reset_service()
 
     from mcdev_bot.qqbot_bot import build_client
 
