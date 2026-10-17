@@ -126,10 +126,12 @@ class McDevQQBot(botpy.Client):
         _log(f"机器人已就绪：{self.robot.name}")
         if settings.qq_push_enabled:
             self._push_task = asyncio.create_task(self._push_scheduler())
-            hours = ",".join(str(h) for h in (settings.push_hours or []))
+            days = "、".join(str(d) for d in (settings.qq_push_days or []))
+            hours = ",".join(str(h) for h in (settings.qq_push_hours or []))
             _log(
-                f"定时推送已开启：每天 {hours} 时 {settings.push_minute:02d} 分"
-                f"（配额上限 {settings.qq_push_max_per_month} 条/群/月）"
+                f"定时推送已开启：每月 {days} 日 {hours} 时 "
+                f"{settings.qq_push_minute:02d} 分"
+                f"（每月 {len(settings.qq_push_days or [])} 次，平台硬限 {settings.qq_push_max_per_month} 条/群/月）"
             )
             if not known_groups():
                 _log("提示：还没有记录到任何群，请先在被推送的群里 @机器人 一次")
@@ -168,22 +170,23 @@ class McDevQQBot(botpy.Client):
             _log(f"单聊回复失败：{exc}")
 
     # ------------------------------------------------------------------
-    # 主动推送（受平台配额限制：群聊每月 4 条，默认关闭）
+    # 主动推送（受平台配额限制：群聊每群每月 4 条，默认 4 次/月）
     # ------------------------------------------------------------------
     async def _push_scheduler(self) -> None:
-        """每分钟检查一次，命中配置的小时/分钟就推送一次。"""
+        """定期检查，命中「日期 + 小时 + 分钟」就推送一次。"""
         last_fired = ""
         while True:
             try:
                 now = datetime.now()
-                key = now.strftime("%Y-%m-%d %H:%M")
                 if (
-                    now.hour in (settings.push_hours or [])
-                    and now.minute == settings.push_minute
-                    and key != last_fired
+                    now.day in (settings.qq_push_days or [])
+                    and now.hour in (settings.qq_push_hours or [])
+                    and now.minute == settings.qq_push_minute
                 ):
-                    last_fired = key
-                    await self._do_push()
+                    key = now.strftime("%Y-%m-%d %H:%M")
+                    if key != last_fired:
+                        last_fired = key
+                        await self._do_push()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -207,42 +210,43 @@ class McDevQQBot(botpy.Client):
         quota = settings.qq_push_max_per_month
         state = self._quota_state()
         counts: Dict[str, int] = state["count"]  # type: ignore[assignment]
+        reply = await dispatcher.build_push_reply(compact=True)
 
-        reply = await dispatcher.build_push_reply()
         for gid in groups:
             used = int(counts.get(gid, 0))
             if used >= quota:
                 _log(f"群 {gid} 本月主动消息配额已用尽（{used}/{quota}），跳过")
                 continue
-            sent = await self._send_group_active(gid, reply, quota - used)
-            if sent:
-                counts[gid] = used + sent
-                _log(f"已推送到群 {gid}（本月 {counts[gid]}/{quota} 条）")
+            try:
+                await self._send_group_one(gid, reply)
+            except Exception as exc:  # noqa: BLE001
+                _log(
+                    f"推送到群 {gid} 失败：{exc}\n"
+                    "        提示：平台要求群主在群设置里打开「机器人主动在群聊内发言」"
+                    "（如为个人开发者账号，还需机器人已审核上架）"
+                )
+                continue
+            counts[gid] = used + 1
+            _log(f"已推送到群 {gid}（本月 {counts[gid]}/{quota} 条）")
+
         state["count"] = counts
         _save_json(_PUSH_STATE_FILE, state)
 
-    async def _send_group_active(self, gid: str, reply: Reply, budget: int) -> int:
-        """主动消息发送（无 msg_id）。返回实际消耗的条数。"""
-        seq = 1
-        sent = 0
-        if reply.text:
-            for chunk in _chunks(reply.text):
-                if sent >= budget:
-                    _log(f"群 {gid} 配额不足，文本未发完")
-                    return sent
-                await self.api.post_group_message(
-                    group_openid=gid, msg_type=0, content=chunk, msg_seq=seq,
-                )
-                seq += 1
-                sent += 1
-        if reply.image and sent < budget:
+    async def _send_group_one(self, gid: str, reply: Reply) -> None:
+        """主动消息每次只发 1 条，保证「一次推送 = 消耗 1 条配额」。"""
+        if reply.image:
             media = await self._upload_group_image(gid, reply.image)
             if media:
                 await self.api.post_group_message(
-                    group_openid=gid, msg_type=7, media=media, msg_seq=seq,
+                    group_openid=gid, msg_type=7, media=media, msg_seq=1,
                 )
-                sent += 1
-        return sent
+                return
+        text = (reply.text or "").strip()
+        if len(text) > _TEXT_CHUNK:
+            text = text[: _TEXT_CHUNK - 1] + "…"
+        await self.api.post_group_message(
+            group_openid=gid, msg_type=0, content=text, msg_seq=1,
+        )
 
     # ------------------------------------------------------------------
     # 发送

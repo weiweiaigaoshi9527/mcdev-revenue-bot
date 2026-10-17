@@ -332,8 +332,12 @@ async def _cmd_activity_check() -> Reply:
 # ----------------------------------------------------------------------
 # 推送内容（「推送测试」预览 + 官方机器人定时推送共用）
 # ----------------------------------------------------------------------
-async def build_push_reply() -> Reply:
-    """构建一条推送：最新一日收益 + 预计实际收益与团队分成 + 收益看板图。"""
+async def build_push_reply(compact: bool = False) -> Reply:
+    """构建一条推送：最新一日收益 + 预计实际收益与团队分成 + 收益看板图。
+
+    ``compact=True`` 时只输出摘要（去掉各地图明细），确保**一条消息**装得下——
+    官方机器人的主动消息每条都占用配额，必须一次发完。
+    """
     svc = get_service()
     # 平台数据有发布延迟，取「最近一个有数据的日期」，避免刚过零点推成全 0
     ov = await svc.latest_available()
@@ -343,7 +347,15 @@ async def build_push_reply() -> Reply:
         if ov.end_date == yesterday_str
         else "我的世界开发者收益 · 最新可用数据"
     )
-    parts = [render_yesterday(ov, title=title)]
+    if compact:
+        parts = [
+            f"{title}\n{ov.end_date}\n\n"
+            f"钻石收益：{fmt_int(ov.total_diamond)}"
+            f"（≈ {ov.total_diamond / 100:,.2f} 元）\n"
+            f"销量：{fmt_int(ov.total_sales)} 份｜下载：{fmt_int(ov.total_download)} 次"
+        ]
+    else:
+        parts = [render_yesterday(ov, title=title)]
 
     if settings.push_split and settings.partners:
         summary = None
@@ -355,14 +367,22 @@ async def build_push_reply() -> Reply:
             settled = float(summary.get("settled_rmb") or 0)
             pending = float(summary.get("pending_rmb") or 0)
             total = float(summary.get("total_rmb") or 0)
-            settled_months = "、".join(summary.get("settled_months") or []) or "无"
-            pending_months = "、".join(summary.get("pending_months") or []) or "无"
-            parts.append(
-                "—— 预计实际收益 ——\n"
-                f"官方已结算：{settled:,.2f} 元（{settled_months}）\n"
-                f"未结算预估：{pending:,.2f} 元（{pending_months}）\n"
-                f"合计：{total:,.2f} 元"
-            )
+            if compact:
+                parts.append(
+                    "—— 预计实际收益 ——\n"
+                    f"已结算：{settled:,.2f} 元\n"
+                    f"未结算预估：{pending:,.2f} 元\n"
+                    f"合计：{total:,.2f} 元"
+                )
+            else:
+                settled_months = "、".join(summary.get("settled_months") or []) or "无"
+                pending_months = "、".join(summary.get("pending_months") or []) or "无"
+                parts.append(
+                    "—— 预计实际收益 ——\n"
+                    f"官方已结算：{settled:,.2f} 元（{settled_months}）\n"
+                    f"未结算预估：{pending:,.2f} 元（{pending_months}）\n"
+                    f"合计：{total:,.2f} 元"
+                )
             if total > 0:
                 shares = split_among_partners(int(round(total * 100)), settings.partners)
                 parts.append(f"—— 团队分成（按预计实际收益 {total:,.2f} 元）——")

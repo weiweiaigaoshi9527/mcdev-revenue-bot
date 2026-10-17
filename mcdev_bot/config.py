@@ -142,9 +142,13 @@ class Settings:
     qq_secret: str = ""
     qq_sandbox: bool = False
     qq_admins: List[str] = None  # type: ignore[assignment]  管理员 openid，用于秒杀申请
-    # 官方群聊主动消息有硬性配额（平台限制：每群每月 4 条），因此默认关闭定时推送
+    # 官方群聊主动消息有硬性配额（平台限制：每群每月 4 条），因此默认低频推送
     qq_push_enabled: bool = False
     qq_push_max_per_month: int = 4
+    qq_push_days: List[int] = None    # 每月哪几天推（默认 1/8/15/22，正好 4 次）
+    qq_push_hours: List[int] = None   # 推送小时
+    qq_push_minute: int = 0
+    qq_push_chart: bool = False       # 是否附带看板图片（会多消耗 1 条配额）
 
     # ---- 派生属性 ----
     @property
@@ -217,6 +221,12 @@ class Settings:
         self.qq_admins = _env_list("QQ_BOT_ADMINS")
         self.qq_push_enabled = _env_bool("QQ_BOT_PUSH_ENABLED", False)
         self.qq_push_max_per_month = max(1, _env_int("QQ_BOT_PUSH_MAX_PER_MONTH", 4))
+        days = _env_int_list("QQ_BOT_PUSH_DAYS") or [1, 8, 15, 22]
+        self.qq_push_days = sorted({d for d in days if 1 <= d <= 31})
+        qq_hours = _env_int_list("QQ_BOT_PUSH_HOURS") or [10]
+        self.qq_push_hours = sorted({h for h in qq_hours if 0 <= h <= 23})
+        self.qq_push_minute = _env_int("QQ_BOT_PUSH_MINUTE", 0)
+        self.qq_push_chart = _env_bool("QQ_BOT_PUSH_CHART", False)
 
         if not self.base_url.endswith("/"):
             self.base_url += "/"
