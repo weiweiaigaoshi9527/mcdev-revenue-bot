@@ -6,8 +6,8 @@
 #      ./deploy/android/start.sh
 #
 #  说明：
-#     前台运行，日志直接打印到当前终端，Ctrl+C 退出。
-#     需要后台常驻请改用 deploy/android/service.sh
+#     前台运行官方 QQ 机器人（bot_qq.py），日志直接打印到当前终端，Ctrl+C 退出。
+#     需要后台常驻请改用 deploy/android/watchdog.sh
 # ============================================================
 set -euo pipefail
 
@@ -27,5 +27,5 @@ export MPLBACKEND=Agg
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 
 cd "$APP_DIR"
-echo "启动机器人（反向 WS 监听 127.0.0.1:8080）..."
-exec "$VENV/bin/python" bot.py
+echo "启动官方 QQ 机器人（出站长连接，无需开放端口）..."
+exec "$VENV/bin/python" bot_qq.py

@@ -11,9 +11,9 @@
 #          ./deploy/android/install.sh
 #
 #  说明：
-#     · 安卓无需 root，QQ 接入推荐用官方 NapCat.Termux（Termux 内 proot 跑
-#       官方 QQ + NapCat），也可用 OpenShamrock + LSPatch 注入手机 QQ
-#     · 本脚本只负责把「机器人服务端」跑起来，QQ 接入见 deploy/android/README.md
+#     · 安卓无需 root
+#     · 部署的是「官方 QQ 机器人」（bot_qq.py）：不需要 NapCat，
+#       也不需要挂 QQ 客户端，只要 AppID + AppSecret
 #     · matplotlib 在 Termux 上需要现场编译，可能较慢甚至失败；
 #       失败时脚本会提示，机器人仍可正常运行（图表自动降级为文字）
 # ============================================================
@@ -24,6 +24,7 @@ VENV="$APP_DIR/.venv"
 
 echo "============================================================"
 echo " 我的世界开发者收益 QQ 机器人 · Android(Termux) 部署"
+echo " 模式：官方 QQ 机器人（无需 NapCat / 无需挂 QQ）"
 echo "============================================================"
 echo "项目目录：$APP_DIR"
 echo
@@ -43,13 +44,15 @@ pkg install -y python python-pip git || {
     echo "!! 系统依赖安装失败，请检查网络后重试"
     exit 1
 }
+# aiohttp 在 Termux 上编译较慢，优先用官方预编译包
+pkg install -y python-aiohttp || echo "  （python-aiohttp 预编译包不可用，稍后由 pip 处理）"
 # 中文字体（图表用，可选）
 pkg install -y fontconfig || true
-# procps 提供 pgrep，供 watchdog.sh 看护 NapCat（可选）
+# procps 提供 pgrep，供 watchdog.sh 判断进程
 pkg install -y procps || true
 
 # ------------------------------------------------------------
-# 2. 虚拟环境（--system-site-packages 以便复用 pkg 安装的 numpy）
+# 2. 虚拟环境（--system-site-packages 以便复用 pkg 安装的 aiohttp/numpy）
 # ------------------------------------------------------------
 echo
 echo "==> [2/5] 创建虚拟环境"
@@ -71,14 +74,13 @@ pkg install -y python-numpy || echo "  （python-numpy 安装失败，稍后由 
 echo
 echo "==> [4/5] 安装 Python 依赖"
 CORE_DEPS=(
-    "nonebot2[fastapi]>=2.3.0"
-    "nonebot-adapter-onebot>=2.4.0"
-    "nonebot-plugin-apscheduler>=0.5.0"
+    "qq-botpy>=1.2.0"
     "httpx>=0.27.0"
     "python-dotenv>=1.0.0"
 )
 "$VENV/bin/pip" install "${CORE_DEPS[@]}" || {
     echo "!! 核心依赖安装失败，请检查网络后重试"
+    echo "   若卡在 aiohttp 编译，可先执行： pkg install -y python-aiohttp"
     exit 1
 }
 
@@ -98,7 +100,7 @@ echo
 echo "==> [5/5] 准备配置文件"
 if [ ! -f "$APP_DIR/.env" ]; then
     cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-    echo "已生成 .env（请填写 MCDEV_COOKIE 等配置）"
+    echo "已生成 .env（请填写 QQ_BOT_APPID / QQ_BOT_SECRET / MCDEV_COOKIE）"
 else
     echo ".env 已存在，跳过"
 fi
@@ -109,24 +111,20 @@ echo
 echo "============================================================"
 echo " 部署完成"
 echo "============================================================"
-echo "  自检（校验 Cookie 与接口）"
+echo "  1) 填写配置（AppID / AppSecret / Cookie）"
+echo "      nano $APP_DIR/.env"
+echo
+echo "  2) 自检（校验 Cookie 与接口）"
 echo "      $VENV/bin/python tools/probe.py"
 echo
-echo "  前台启动（调试）"
+echo "  3) 前台启动（先确认能连上腾讯网关）"
 echo "      ./deploy/android/start.sh"
 echo
-echo "  后台常驻（保活守护：唤醒锁 + 崩溃自动重启，推荐）"
+echo "  4) 后台常驻（保活守护：唤醒锁 + 崩溃自动重启，推荐）"
 echo "      ./deploy/android/watchdog.sh start   # 启动守护"
 echo "      ./deploy/android/watchdog.sh status  # 查看状态"
-echo "      ./deploy/android/watchdog.sh stop    # 停止"
+echo "      ./deploy/android/watchdog.sh log     # 实时日志"
 echo
-echo "  系统侧保活设置（电池优化白名单 + 开机自启）"
+echo "  5) 系统侧保活设置（电池优化白名单 + 开机自启）"
 echo "      ./deploy/android/keepalive.sh"
-echo
-echo "  QQ 接入（免 root）：推荐官方 NapCat.Termux，一键安装："
-echo "      curl -o napcat.termux.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh && bash napcat.termux.sh"
-echo "  安装后在 NapCat WebUI（http://localhost:6099/webui）的「网络配置」中"
-echo "  新建 WebSocket 客户端（反向），地址填："
-echo "      ws://127.0.0.1:8080/onebot/v11/ws"
-echo "  另一条免 root 路线：OpenShamrock + LSPatch。详见 deploy/android/README.md"
 echo

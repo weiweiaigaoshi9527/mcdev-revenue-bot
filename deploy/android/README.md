@@ -1,202 +1,110 @@
-# Android 部署指南（Termux + 免 root 方案）
+# Android 部署指南（Termux · 免 root · 不挂电脑）
 
-本目录让机器人**服务端本身跑在安卓手机上**（Termux 里的 Python 进程），
-再把手机上的 QQ 接入 OneBot v11 协议。
+把官方 QQ 机器人跑在一台闲置安卓手机上：**不需要电脑、不需要 root、
+不需要挂 QQ 客户端**。手机只跑一个 Python 进程，通过出站 WebSocket
+连腾讯网关即可，不用开放任何端口。
 
-**安卓不 root 也能跑**，有两条免 root 路线，推荐第一种：
+```
+┌──────────── 安卓手机 ────────────┐
+│  Termux                          │
+│   └── bot_qq.py                  │
+│         │ 出站 WSS               │
+└─────────┼────────────────────────┘
+          ▼
+     腾讯 QQ 机器人网关
+```
 
-| 方案 | 需要 Root | 原理 | 稳定性 |
-| --- | --- | --- | --- |
-| **A. NapCat.Termux**（推荐） | **不需要** | 在 Termux 里用 proot 跑官方 QQ Linux 客户端 + NapCat | 高，与 Windows 版同款 NapCat |
-| **B. OpenShamrock + LSPatch** | 不需要（但需修补 QQ） | 把 Xposed 模块注入手机 QQ | 一般，回调受限、QQ 版本敏感 |
-
-> 方案 B 若用 **LSPosed**（需 Root）则稳定性更好，但既然要免 root，就走 LSPatch。
+> 传统 NapCat 方案要在手机上跑官方 QQ 客户端 + proot 环境，又重又容易掉。
+> 官方机器人模式只需要 `qq-botpy`，手机上占用极小，是「不挂电脑」的最优解。
 
 ---
 
-## 一、方案 A：NapCat.Termux（免 root，推荐）
+## 一、准备
 
-```
-┌──────────────────────── 安卓手机 ────────────────────────┐
-│  Termux                                                   │
-│   ├── proot Linux ── QQ Linux 客户端 + NapCat             │
-│   │                        │                              │
-│   │                   反向 WS                            │
-│   │                        ▼                              │
-│   └── bot.py（本机器人服务端）  127.0.0.1:8080             │
-└───────────────────────────────────────────────────────────┘
-```
+1. 从 [F-Droid](https://f-droid.org/packages/com.termux/) 安装 **Termux**
+   （**不要**用 Google Play 上的旧版，那个已停止更新且装不了新包）。
+2. 建议同时装 [Termux:Boot](https://f-droid.org/packages/com.termux.boot/)，
+   用于开机自启。
+3. 在 [q.qq.com](https://q.qq.com/) 创建机器人，拿到 **AppID** 与 **AppSecret**。
 
-NapCat 官方提供了 **NapCat.Termux**，脚本会在 Termux 内自动搭好
-proot Linux 环境并安装官方 QQ 与 NapCat，**全程无需 root**。
-好处是它和 Windows 版是同一个 NapCat，配置、行为完全一致。
+---
 
-### 0. 一键部署（最快）
+## 二、一键部署
 
-把 `qqbot` 目录放进手机后，在 Termux 里只跑一条命令，机器人 + NapCat 一起装好：
+把 `qqbot` 目录传到手机（数据线 / 网盘均可），然后在 Termux 中：
 
 ```bash
+termux-setup-storage            # 授权访问手机存储
+cp -r /sdcard/qqbot ~/qqbot     # 路径按实际存放位置调整
 cd ~/qqbot
-chmod +x deploy/android/setup-all.sh
+chmod +x deploy/android/*.sh
 ./deploy/android/setup-all.sh
 ```
 
-装完按脚本结尾的「后续 3 步」操作即可（填 Cookie → 启动机器人 → 启动 NapCat 扫码）。
-下面 1~4 步是分步说明，便于排查问题。
-
-### 1. 部署机器人服务端
-
-1. 从 [F-Droid](https://f-droid.org/packages/com.termux/) 安装 Termux
-   （不要用 Google Play 上的旧版本）。
-2. 把 `qqbot` 目录放进手机，再复制进 Termux 家目录：
-
-   ```bash
-   termux-setup-storage          # 授权访问手机存储
-   cp -r /sdcard/qqbot ~/qqbot
-   cd ~/qqbot
-   ```
-
-3. 一键部署：
-
-   ```bash
-   chmod +x deploy/android/install.sh
-   ./deploy/android/install.sh
-   ```
-
-   编辑 `.env` 填写 `MCDEV_COOKIE`（获取方式同主 README 第三节）。
-
-4. 启动机器人（保活守护，自动持有唤醒锁并崩溃重启）：
-
-   ```bash
-   ./deploy/android/watchdog.sh start     # 启动守护
-   ./deploy/android/watchdog.sh status    # 查看状态
-   ./deploy/android/watchdog.sh log       # 实时日志
-   ```
-
-### 2. 安装并启动 NapCat
-
-在 Termux 中执行官方一键脚本：
-
-```bash
-curl -o napcat.termux.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.termux.sh && bash napcat.termux.sh
-```
-
-> 脚本会下载 proot 环境、官方 QQ 与 NapCat，耗时较长，中途失败重新执行即可。
-
-安装完成后，用 NapCat 的 CLI 启动（把 `QQ号` 换成机器人小号）：
-
-```bash
-napcat start QQ号        # 启动
-napcat log QQ号          # 查看日志 / 二维码
-```
-
-### 3. 扫码登录
-
-启动后 NapCat 会在日志里打印登录二维码。因为二维码在手机自己的屏幕上，
-可以这样扫：
-
-- **截图法**：`napcat log QQ号` 看到二维码 → 截屏 → 用 QQ 的「扫一扫 → 相册」识别；
-- **另一台设备法**：用另一台手机的 QQ 扫这块屏幕；
-- **WebUI 法**：直接进下一步的 WebUI（`http://localhost:6099/webui`）里点扫码登录。
-
-> 请务必用**机器人小号**扫码，不要用主号。
-
-### 4. 配置反向 WebSocket
-
-浏览器打开 NapCat 的 WebUI：
-
-```
-http://localhost:6099/webui
-```
-
-首次登录 token 可在终端查看：
-
-```bash
-cat ~/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json | grep token
-```
-
-登录后在 **网络配置** 中新建 **WebSocket 客户端（反向）**：
-
-| 配置项 | 值 |
-| --- | --- |
-| URL | `ws://127.0.0.1:8080/onebot/v11/ws` |
-| 消息格式 | `Array` |
-| 心跳间隔 / 重连间隔 | `5000` |
-
-保存并启用后，回到 Termux 用 `./deploy/android/service.sh log` 看机器人日志，
-出现 OneBot V11 连接记录（含 bot 的 QQ 号）即接入成功。
-
-> NapCat 与机器人都跑在同一台手机的 Termux 里，proot 共享网络，
-> 所以 `127.0.0.1` 可以直连，无需改成局域网 IP。
+脚本会自动完成：安装 Python 与依赖 → 创建虚拟环境 → 安装 `qq-botpy`
+→ 生成 `.env` → 写入开机自启脚本 → 打开电池优化设置页。
 
 ---
 
-## 二、方案 B：OpenShamrock + LSPatch（免 root，注入式）
+## 三、填写配置
 
-不想在手机上跑 QQ Linux 客户端、想直接用**手机版 QQ** 时选这个。
-用 LSPatch 免 root 把 OpenShamrock 模块注入 QQ。
+```bash
+nano ~/qqbot/.env
+```
 
-> 官方 Shamrock 文档明确把「**无 Root 环境 → 使用 LSPatch**」列为受支持方案。
+至少填三项：
 
-1. 从 OpenShamrock 官方发布页下载 **带 `all` 字样**的安装包并安装。
-2. 打开 **LSPatch** → `管理` → `+` 新建修补 → 选择已安装的 QQ。
-3. 修补模式选 **本地模式**（方便更新模块，缺点是 LSPatch 要保持后台运行）；
-   其他保持默认，点「开始修补」，完成后按提示安装。
-4. 回到 LSPatch `管理`，点修补好的 QQ → `模块作用域` → 勾选 Shamrock → 保存。
-5. 启动 Shamrock，**重启 QQ 客户端**，Shamrock 显示「已激活」即成功。
-6. 在 Shamrock 设置页配置：
+```ini
+QQ_BOT_APPID=你的AppID
+QQ_BOT_SECRET=你的AppSecret
+MCDEV_COOKIE=开发者平台复制的完整 Cookie
+```
 
-| 配置项 | 值 |
-| --- | --- |
-| 消息格式为 CQ 码 | 开启 |
-| 被动 WebSocket（反向 WS） | 开启 |
-| 被动 WS 监听地址 | `ws://127.0.0.1:8080/onebot/v11/ws` |
+自检（确认 Cookie 有效、接口能通）：
 
-**局限**：LSPatch 方式下**回调能力受限**，且对 QQ 版本较敏感（版本过新可能注入失败），
-长期挂机稳定性不如方案 A。若手机已 root，用 LSPosed 代替 LSPatch 会明显更稳。
+```bash
+~/qqbot/.venv/bin/python ~/qqbot/tools/probe.py
+```
 
 ---
 
-## 三、保活设置（重要）
+## 四、启动
 
-安卓系统对后台进程管得很严，息屏后很容易把 Termux 连同机器人一起杀掉。
-本项目提供了两层保活：**进程守护**（watchdog.sh）+ **系统侧设置**（keepalive.sh）。
-
-### 1. 进程守护 watchdog.sh
+**先前台试跑一次**，确认能连上腾讯网关：
 
 ```bash
-./deploy/android/watchdog.sh start     # 启动守护
-./deploy/android/watchdog.sh status    # 查看状态
-./deploy/android/watchdog.sh log       # 实时日志
-./deploy/android/watchdog.sh stop      # 停止守护（连同机器人）
+cd ~/qqbot
+./deploy/android/start.sh
 ```
 
-它会做三件事：
+看到下面这行说明成功，按 `Ctrl+C` 停掉：
 
-- 持有 `termux-wake-lock` 唤醒锁，避免息屏后 CPU 休眠导致掉线；
-- 每 30 秒检查一次机器人进程，崩溃或被系统杀掉后**自动拉起**；
-- 可选看护 NapCat：在 `.env` 里加 `MCDEV_WATCHDOG_QQ=机器人QQ号` 即可，
-  检测到 NapCat 不在就跑 `napcat start`。
+```
+[mcdev-qqbot] 机器人已就绪：虹小轩我的世界机器人
+```
 
-检查间隔可用 `MCDEV_WATCHDOG_INTERVAL` 调整（默认 30 秒）。
+**再转后台常驻**（推荐，带唤醒锁 + 崩溃自动重启）：
 
-> `watchdog.sh` 与 `service.sh` 管理同一个 `bot.pid`，**请勿同时运行**。
-> 长期挂机用 `watchdog.sh`，临时调试用 `service.sh`。
+```bash
+./deploy/android/watchdog.sh start
+./deploy/android/watchdog.sh status
+./deploy/android/watchdog.sh log      # 实时日志
+```
 
-### 2. 系统侧设置 keepalive.sh
+然后在 QQ 群里 **@机器人** 发 `帮助` 即可。
+
+---
+
+## 五、保活设置（关键）
+
+安卓对后台进程管得很严，不做下面几步，息屏后大概率被杀。
 
 ```bash
 ./deploy/android/keepalive.sh
 ```
 
-脚本会自动完成能自动的部分，并打开设置页引导你完成手动部分：
-
-- 写入 **Termux:Boot 开机自启**脚本（`~/.termux/boot/mcdev-watchdog.sh`），
-  开机后自动拉起守护；需安装 [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) 才生效；
-- 打开**电池优化白名单**设置页；
-- 打开 **Termux 应用详情**页。
-
-### 3. 必须手动确认的项
+脚本会自动写入 `~/.termux/boot/mcdev-watchdog.sh`（开机拉起守护）
+并打开系统设置页。**剩下 4 项必须手动确认**：
 
 | 设置 | 位置 | 目的 |
 | --- | --- | --- |
@@ -205,34 +113,64 @@ cat ~/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json | grep t
 | 允许自启动 / 后台活动 | 应用详情（各品牌叫法不同） | 防止被一键清理 |
 | 最近任务里给 Termux 加锁 | 多任务界面下拉卡片 | 避免「一键清理」误杀 |
 
-> NapCat 侧可在其 WebUI「登录配置」里保存 bot QQ，之后无需再扫码；
-> 重启后用 `napcat start QQ号` 拉起（也可交由 watchdog 看护）。
+各品牌额外注意：
+
+- **小米 / 红米**：设置 → 应用设置 → Termux → 省电策略「无限制」，
+  并在「自启动管理」里打开。
+- **华为 / 荣耀**：应用启动管理 → Termux → 改为「手动管理」，三项全开。
+- **OPPO / vivo**：允许后台运行 + 关闭「智能省电」对 Termux 的限制。
+
+> 手机插着充电线常开即可。机器人进程本身很轻，CPU 占用几乎为 0，
+> 只在收到指令时才会请求接口并渲染图表。
 
 ---
 
-## 四、常见问题
+## 六、常用命令
 
-**Q：安卓到底要不要 root？**
-不要。走 **NapCat.Termux**（方案 A）完全免 root；走 OpenShamrock 时用
-**LSPatch** 也能免 root，只是稳定性差一些。
+```bash
+./deploy/android/watchdog.sh start     # 启动守护
+./deploy/android/watchdog.sh status    # 查看状态
+./deploy/android/watchdog.sh log       # 实时日志
+./deploy/android/watchdog.sh stop      # 停止
+./deploy/android/service.sh start      # 无守护的后台启动（临时调试用）
+```
 
-**Q：机器人日志里没有连接记录？**
-依次检查：NapCat 是否已启动并登录成功；WebUI 里反向 WS 是否已「启用」；
-URL 是否为 `ws://127.0.0.1:8080/onebot/v11/ws`；`.env` 的 `PORT` 是否一致；
-机器人是否在运行（`service.sh status`）。
+> `watchdog.sh` 与 `service.sh` 管理同一个 `bot.pid`，**不要同时运行**。
+> 长期挂机用 `watchdog.sh`。
 
-**Q：手机耗电/发热？**
-机器人本身很轻量，主要开销来自 proot 里的 QQ、图表渲染与定时推送。
-可把 `MCDEV_CHART_ENABLED` 设为 `false`、减少 `MCDEV_PUSH_HOURS` 来降低负载。
+---
 
-**Q：和 Windows 版能同时用吗？**
-可以。两端用**不同的 QQ 号**登录即可（同一个 QQ 号不能同时登录）。
+## 七、常见问题
 
-**Q：图表中文显示为方框？**
-缺少 CJK 字体，执行 `pkg install -y fontconfig` 后把中文字体放进 `~/.fonts`；
-或直接在 `.env` 中设置 `MCDEV_CHART_ENABLED=false` 关闭图表。
+**Q：需要 root 吗？**
+不需要。整个方案只用到 Termux 普通权限。
 
-**Q：挂一段时间就掉线 / 进程消失了？**
-说明被安卓系统杀了后台。按第三节做两层保活：`watchdog.sh start` 起进程守护
-（唤醒锁 + 崩溃自动重启），再用 `keepalive.sh` 打开设置页把 Termux 加进
-**电池优化白名单**并允许自启动。这两步缺一不可。
+**Q：需要电脑配合吗？**
+不需要。部署完成后手机独立运行，电脑关机不影响。
+
+**Q：需要公网 IP 或端口映射吗？**
+不需要。官方机器人是**出站长连接**，路由器不用做任何设置。
+
+**Q：耗电和流量大吗？**
+待机时进程基本空闲，仅维持一条 WebSocket 心跳。流量以 KB 计。
+收到指令时才请求开发者平台并渲染图表。
+
+**Q：图表中文变成方框？**
+Termux 缺少 CJK 字体。可执行 `pkg install -y fontconfig` 后把中文字体
+放进 `~/.fonts`；或直接在 `.env` 里设 `MCDEV_CHART_ENABLED=false` 关闭图表。
+
+**Q：matplotlib 装不上？**
+Termux 上需要现场编译，可能失败。不影响机器人运行——图表指令会自动降级为文字。
+可先 `pkg install -y python-numpy` 再重试：
+`~/qqbot/.venv/bin/pip install --no-build-isolation matplotlib`
+
+**Q：定时推送会执行吗？**
+会，但官方群聊主动消息有硬限（**每群每月 4 条**），且群主需在群设置里
+打开「机器人主动在群聊内发言」。详见主 README。
+
+**Q：挂一段时间就掉线？**
+按第五节做保活：`watchdog.sh start`（唤醒锁 + 自动重启）+
+电池优化白名单 + 允许自启动。这三样缺一不可。
+
+**Q：想换手机 / 迁移？**
+把整个 `qqbot` 目录拷过去，重跑 `install.sh` 即可，`.env` 会保留。

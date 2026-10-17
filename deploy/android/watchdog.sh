@@ -5,7 +5,6 @@
 #  作用：
 #     · 持有 Termux 唤醒锁，避免息屏后 CPU 休眠导致断线
 #     · 周期性检查机器人进程，崩溃/被系统杀掉后自动拉起
-#     · （可选）同时看护 NapCat 进程
 #
 #  用法：
 #     ./deploy/android/watchdog.sh start    启动守护
@@ -16,7 +15,6 @@
 #
 #  可选环境变量（写进 .env 或直接 export）：
 #     MCDEV_WATCHDOG_INTERVAL=30     检查间隔（秒）
-#     MCDEV_WATCHDOG_QQ=123456       填了才看护 NapCat（填机器人 QQ 号）
 #
 #  注意：本脚本与 service.sh 都管理同一个 bot.pid，二者请勿同时运行。
 # ============================================================
@@ -44,7 +42,6 @@ _env_get() {
 # 优先取环境变量，其次取 .env
 CHECK_INTERVAL="${MCDEV_WATCHDOG_INTERVAL:-$(_env_get MCDEV_WATCHDOG_INTERVAL)}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
-NAPCAT_QQ="${MCDEV_WATCHDOG_QQ:-$(_env_get MCDEV_WATCHDOG_QQ)}"
 
 mkdir -p "$RUN_DIR"
 
@@ -68,11 +65,6 @@ watchdog_alive() {
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
-napcat_alive() {
-    command -v pgrep >/dev/null 2>&1 || return 0   # 没有 pgrep 就跳过检查
-    pgrep -f "napcat" >/dev/null 2>&1
-}
-
 # ------------------------------------------------------------
 # 启停机器人
 # ------------------------------------------------------------
@@ -83,7 +75,7 @@ start_bot() {
     fi
     export PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 MPLBACKEND=Agg
     cd "$APP_DIR" || return 1
-    nohup "$VENV/bin/python" bot.py >>"$BOT_LOG" 2>&1 &
+    nohup "$VENV/bin/python" bot_qq.py >>"$BOT_LOG" 2>&1 &
     echo $! >"$BOT_PID_FILE"
     log "已拉起机器人，PID $!"
 }
@@ -115,17 +107,12 @@ run_loop() {
 
     trap 'log "守护退出"; rm -f "$PID_FILE"; command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock; exit 0' TERM INT
 
-    log "守护启动（检查间隔 ${CHECK_INTERVAL}s，NapCat 看护：${NAPCAT_QQ:-关闭}）"
+    log "守护启动（检查间隔 ${CHECK_INTERVAL}s）"
 
     while true; do
         if ! bot_alive; then
             log "机器人未运行，正在拉起..."
             start_bot
-        fi
-
-        if [ -n "$NAPCAT_QQ" ] && ! napcat_alive; then
-            log "NapCat 未运行，正在拉起..."
-            nohup napcat start "$NAPCAT_QQ" >>"$RUN_DIR/napcat.log" 2>&1 &
         fi
 
         sleep "$CHECK_INTERVAL"

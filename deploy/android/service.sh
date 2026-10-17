@@ -49,7 +49,7 @@ start_bot() {
     command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 
     cd "$APP_DIR"
-    nohup "$VENV/bin/python" bot.py >>"$LOG_FILE" 2>&1 &
+    nohup "$VENV/bin/python" bot_qq.py >>"$LOG_FILE" 2>&1 &
     echo $! >"$PID_FILE"
     sleep 2
     if is_running; then
