@@ -25,8 +25,10 @@ VENV="$APP_DIR/.venv"
 RUN_DIR="$APP_DIR/.run"
 PID_FILE="$RUN_DIR/watchdog.pid"
 BOT_PID_FILE="$RUN_DIR/bot.pid"
+CONSOLE_PID_FILE="$RUN_DIR/console.pid"
 LOG_FILE="$RUN_DIR/watchdog.log"
 BOT_LOG="$RUN_DIR/bot.log"
+CONSOLE_LOG="$RUN_DIR/console.log"
 
 # 从 .env 读取单个键（只取需要的键，不执行文件内容，避免误执行）
 _env_get() {
@@ -63,6 +65,38 @@ watchdog_alive() {
     local p
     p="$(cat "$PID_FILE" 2>/dev/null || true)"
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+# ------------------------------------------------------------
+# 控制台服务（手机 App / 浏览器访问 127.0.0.1:8770）
+# ------------------------------------------------------------
+console_alive() {
+    [ -f "$CONSOLE_PID_FILE" ] || return 1
+    local p
+    p="$(cat "$CONSOLE_PID_FILE" 2>/dev/null || true)"
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+start_console() {
+    console_alive && return 0
+    [ -x "$VENV/bin/python" ] || return 1
+    export PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 MPLBACKEND=Agg
+    cd "$APP_DIR" || return 1
+    nohup "$VENV/bin/python" deploy/android/console_server.py >>"$CONSOLE_LOG" 2>&1 &
+    echo $! >"$CONSOLE_PID_FILE"
+    log "已拉起控制台服务，PID $!（http://127.0.0.1:8770）"
+}
+
+stop_console() {
+    local p
+    p="$(cat "$CONSOLE_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$p" ]; then
+        kill "$p" 2>/dev/null || true
+        sleep 1
+        kill -9 "$p" 2>/dev/null || true
+        log "已停止控制台服务，PID $p"
+    fi
+    rm -f "$CONSOLE_PID_FILE"
 }
 
 # ------------------------------------------------------------
@@ -109,10 +143,18 @@ run_loop() {
 
     log "守护启动（检查间隔 ${CHECK_INTERVAL}s）"
 
+    # 控制台服务：自检页面要用，先拉起来
+    start_console
+
     while true; do
         if ! bot_alive; then
             log "机器人未运行，正在拉起..."
             start_bot
+        fi
+
+        if ! console_alive; then
+            log "控制台服务未运行，正在拉起..."
+            start_console
         fi
 
         sleep "$CHECK_INTERVAL"
@@ -164,7 +206,14 @@ do_stop() {
     fi
     stop_bot
     command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock || true
-    echo "守护与机器人均已停止"
+    echo "守护与机器人均已停止（控制台仍在运行，便于 App 随时再启动）"
+    echo "如需连控制台一起停：$0 shutdown"
+}
+
+do_shutdown() {
+    do_stop
+    stop_console
+    echo "控制台服务已停止"
 }
 
 do_status() {
@@ -178,18 +227,24 @@ do_status() {
     else
         echo "机器人：未运行"
     fi
+    if console_alive; then
+        echo "控制台：运行中（http://127.0.0.1:8770）"
+    else
+        echo "控制台：未运行"
+    fi
     echo "日志：$LOG_FILE"
 }
 
 case "${1:-}" in
-    start)   do_start ;;
-    stop)    do_stop ;;
-    restart) do_stop; do_start ;;
-    status)  do_status ;;
-    log)     tail -f "$LOG_FILE" ;;
-    run)     run_loop ;;   # 内部：前台运行守护循环
+    start)    do_start ;;
+    stop)     do_stop ;;
+    restart)  do_stop; do_start ;;
+    shutdown) do_shutdown ;;
+    status)   do_status ;;
+    log)      tail -f "$LOG_FILE" ;;
+    run)      run_loop ;;   # 内部：前台运行守护循环
     *)
-        echo "用法：$0 {start|stop|restart|status|log}"
+        echo "用法：$0 {start|stop|restart|shutdown|status|log}"
         exit 1
         ;;
 esac

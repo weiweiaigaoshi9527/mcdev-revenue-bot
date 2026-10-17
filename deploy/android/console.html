@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>MC 开发者收益 · 控制台</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1e222b; --line:#272c37;
+    --txt:#e8ecf3; --dim:#8b94a7; --accent:#4c8dff; --ok:#35c26b;
+    --warn:#e0a33e; --err:#e5544b; --radius:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+      "Microsoft YaHei",sans-serif;font-size:15px;line-height:1.5}
+  body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  .wrap{max-width:720px;margin:0 auto;padding:16px 14px 96px}
+
+  header{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#4c8dff,#7b5cff);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+  header h1{font-size:16px;margin:0;font-weight:600;flex:1}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.off{background:var(--err)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;margin-bottom:12px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .row + .row{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  .label{color:var(--dim);font-size:13px}
+  .value{font-variant-numeric:tabular-nums;font-size:14px}
+  .pill{font-size:12px;padding:2px 9px;border-radius:20px;background:var(--card2);color:var(--dim)}
+  .pill.on{background:rgba(53,194,107,.15);color:var(--ok)}
+  .pill.off{background:rgba(229,84,75,.15);color:var(--err)}
+
+  .actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+  button{font-family:inherit;font-size:14px;border:none;border-radius:11px;
+    padding:11px 10px;background:var(--card2);color:var(--txt);font-weight:500;
+    cursor:pointer;transition:.15s;white-space:nowrap}
+  button:active{transform:scale(.97);opacity:.85}
+  button.primary{background:var(--accent);color:#fff}
+  button.danger{background:rgba(229,84,75,.16);color:var(--err)}
+  button:disabled{opacity:.4;pointer-events:none}
+
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:4px;margin-bottom:12px}
+  .tab{flex:1;text-align:center;padding:8px;border-radius:9px;font-size:14px;
+    color:var(--dim);cursor:pointer;transition:.15s}
+  .tab.active{background:var(--card2);color:var(--txt);font-weight:600}
+  .panel{display:none}
+  .panel.active{display:block}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .chip{font-size:13px;padding:6px 12px;border-radius:20px;background:var(--card2);
+    color:var(--dim);border:1px solid var(--line);cursor:pointer}
+  .chip:active{background:var(--line);color:var(--txt)}
+
+  .inputbar{display:flex;gap:8px;margin-bottom:12px}
+  input[type=text]{flex:1;background:var(--card);border:1px solid var(--line);
+    border-radius:11px;padding:11px 13px;color:var(--txt);font-size:15px;
+    font-family:inherit;outline:none;min-width:0}
+  input[type=text]:focus{border-color:var(--accent)}
+  .send{padding:11px 18px;flex:none}
+
+  .result{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;font-size:14px;white-space:pre-wrap;word-break:break-word;
+    font-variant-numeric:tabular-nums;min-height:64px}
+  .result .img{display:block;width:100%;border-radius:10px;margin-top:12px}
+  .placeholder{color:var(--dim);text-align:center;padding:24px 0}
+
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:12px;
+    padding:12px;font-size:12px;line-height:1.45;overflow:auto;max-height:62vh;
+    white-space:pre-wrap;word-break:break-all;color:#b8c1d1;margin:0;
+    font-family:ui-monospace,Menlo,Consolas,monospace}
+  textarea{width:100%;min-height:58vh;background:#0b0d11;border:1px solid var(--line);
+    border-radius:12px;padding:12px;color:var(--txt);font-size:12.5px;line-height:1.5;
+    font-family:ui-monospace,Menlo,Consolas,monospace;outline:none;resize:vertical}
+  textarea:focus{border-color:var(--accent)}
+
+  .bar{display:flex;gap:8px;margin-top:10px;align-items:center}
+  .bar button{flex:1}
+  .hint{color:var(--dim);font-size:12px;margin-top:8px}
+
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+    background:#2a303d;color:#fff;padding:10px 18px;border-radius:22px;font-size:13.5px;
+    opacity:0;pointer-events:none;transition:.25s;z-index:99;max-width:88vw;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.25);
+    border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;
+    vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">MC</div>
+    <h1>开发者收益控制台</h1>
+    <span class="dot" id="dot"></span>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <span class="label">机器人</span>
+      <span class="pill" id="botPill">检测中…</span>
+    </div>
+    <div class="row">
+      <span class="label">保活守护</span>
+      <span class="pill" id="wdPill">检测中…</span>
+    </div>
+    <div class="row">
+      <span class="label">控制台端口</span>
+      <span class="value" id="portVal">—</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="btnStart">启动</button>
+    <button id="btnRestart">重启</button>
+    <button class="danger" id="btnStop">停止</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="query">查询</div>
+    <div class="tab" data-tab="log">日志</div>
+    <div class="tab" data-tab="env">配置</div>
+  </div>
+
+  <!-- 查询 -->
+  <div class="panel active" id="panel-query">
+    <div class="chips" id="chips"></div>
+    <div class="inputbar">
+      <input type="text" id="cmdInput" placeholder="输入指令，如：收益 7" autocomplete="off">
+      <button class="primary send" id="btnSend">发送</button>
+    </div>
+    <div class="result" id="result">
+      <div class="placeholder">点上面的快捷指令，或输入指令后发送</div>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="panel" id="panel-log">
+    <pre id="logBox">加载中…</pre>
+    <div class="bar">
+      <button id="btnLogRefresh">刷新</button>
+      <button id="btnLogAuto">自动刷新：开</button>
+    </div>
+    <div class="hint">显示机器人最近日志；自动刷新每 3 秒一次。</div>
+  </div>
+
+  <!-- 配置 -->
+  <div class="panel" id="panel-env">
+    <textarea id="envBox" spellcheck="false" placeholder="加载中…"></textarea>
+    <div class="bar">
+      <button class="primary" id="btnEnvSave">保存</button>
+      <button id="btnEnvReload">重新读取</button>
+    </div>
+    <div class="hint">改动保存后立即生效（查询接口会重新加载配置，机器人进程需重启才生效）。</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, opt) => fetch(p, opt).then(r => r.json());
+
+let toastTimer;
+function toast(msg){
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+/* ---------- 状态 ---------- */
+async function refreshStatus(){
+  try{
+    const s = await api('/api/status');
+    $('#dot').className = 'dot ' + (s.bot_running ? 'on' : 'off');
+    const bot = $('#botPill');
+    bot.textContent = s.bot_running ? ('运行中 · PID ' + s.bot_pid) : '已停止';
+    bot.className = 'pill ' + (s.bot_running ? 'on' : 'off');
+    const wd = $('#wdPill');
+    wd.textContent = s.watchdog_running ? ('运行中 · PID ' + s.watchdog_pid) : '未运行';
+    wd.className = 'pill ' + (s.watchdog_running ? 'on' : '');
+    $('#portVal').textContent = s.port;
+  }catch(e){
+    $('#dot').className = 'dot off';
+    $('#botPill').textContent = '控制台未连接';
+    $('#botPill').className = 'pill off';
+    $('#wdPill').textContent = '—';
+    $('#wdPill').className = 'pill';
+  }
+}
+
+/* ---------- 启停 ---------- */
+async function action(name, label){
+  const btns = document.querySelectorAll('.actions button');
+  btns.forEach(b => b.disabled = true);
+  toast(label + '中…');
+  try{
+    const r = await api('/api/watchdog', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:name})
+    });
+    toast(r.ok ? (label + '完成') : ('失败：' + (r.output || '未知错误')));
+  }catch(e){
+    toast('请求失败：' + e.message);
+  }
+  btns.forEach(b => b.disabled = false);
+  setTimeout(refreshStatus, 800);
+}
+$('#btnStart').onclick   = () => action('start', '启动');
+$('#btnStop').onclick    = () => action('stop', '停止');
+$('#btnRestart').onclick = () => action('restart', '重启');
+
+/* ---------- 标签页 ---------- */
+document.querySelectorAll('.tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    $('#panel-' + t.dataset.tab).classList.add('active');
+    if (t.dataset.tab === 'log') loadLog();
+    if (t.dataset.tab === 'env') loadEnv();
+  };
+});
+
+/* ---------- 查询 ---------- */
+const QUICK = ['收益','地图','昨日','余额','结算','分成','数据','图表','趋势图','月报图','活动','秒杀','帮助'];
+QUICK.forEach(c => {
+  const b = document.createElement('div');
+  b.className = 'chip';
+  b.textContent = c;
+  b.onclick = () => { $('#cmdInput').value = c; send(); };
+  $('#chips').appendChild(b);
+});
+
+let sending = false;
+async function send(){
+  if (sending) return;
+  const text = $('#cmdInput').value.trim();
+  if (!text){ toast('请输入指令'); return; }
+  sending = true;
+  const btn = $('#btnSend');
+  btn.innerHTML = '<span class="spin"></span>查询';
+  $('#result').innerHTML = '<div class="placeholder">查询中…</div>';
+  try{
+    const r = await api('/api/query', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text})
+    });
+    let html = '';
+    if (r.text) html += escapeHtml(r.text);
+    if (r.image) html += '<img class="img" src="data:image/png;base64,' + r.image + '">';
+    if (r.caption && r.image) html += '\n' + escapeHtml(r.caption);
+    $('#result').innerHTML = html || '<div class="placeholder">（无内容）</div>';
+  }catch(e){
+    $('#result').innerHTML = '<div class="placeholder">请求失败：' + escapeHtml(e.message) + '</div>';
+  }
+  btn.textContent = '发送';
+  sending = false;
+}
+$('#btnSend').onclick = send;
+$('#cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
+/* ---------- 日志 ---------- */
+let autoLog = true, logTimer;
+
+async function loadLog(){
+  try{
+    const r = await api('/api/log?lines=200');
+    const box = $('#logBox');
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.textContent = (r.bot || '（暂无机器人日志）');
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }catch(e){
+    $('#logBox').textContent = '读取失败：' + e.message;
+  }
+}
+function scheduleLog(){
+  clearInterval(logTimer);
+  if (autoLog) logTimer = setInterval(loadLog, 3000);
+}
+$('#btnLogRefresh').onclick = loadLog;
+$('#btnLogAuto').onclick = () => {
+  autoLog = !autoLog;
+  $('#btnLogAuto').textContent = '自动刷新：' + (autoLog ? '开' : '关');
+  scheduleLog();
+  if (autoLog) loadLog();
+};
+
+/* ---------- 配置 ---------- */
+async function loadEnv(){
+  try{
+    const r = await api('/api/env');
+    $('#envBox').value = r.text || '';
+  }catch(e){
+    toast('读取失败：' + e.message);
+  }
+}
+$('#btnEnvReload').onclick = () => { loadEnv(); toast('已重新读取'); };
+$('#btnEnvSave').onclick = async () => {
+  const btn = $('#btnEnvSave');
+  btn.disabled = true;
+  try{
+    const r = await api('/api/env', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text: $('#envBox').value})
+    });
+    toast(r.ok ? '已保存' : ('保存失败：' + (r.output || '')));
+  }catch(e){
+    toast('保存失败：' + e.message);
+  }
+  btn.disabled = false;
+};
+
+/* ---------- 初始化 ---------- */
+refreshStatus();
+setInterval(refreshStatus, 5000);
+scheduleLog();
+</script>
+</body>
+</html>

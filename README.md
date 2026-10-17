@@ -150,7 +150,11 @@ qqbot/
 │   ├── README.md              # 多平台部署总览
 │   ├── windows/               # 计划任务自启（install/uninstall-service.ps1）
 │   ├── linux/                 # systemd 服务 + 一键安装脚本
-│   └── android/               # Termux 部署 + 免 root 接入指南（NapCat.Termux）
+│   └── android/               # Termux 部署 + 手机 App（控制台）
+│       ├── console_server.py  # 本地控制台后端（127.0.0.1:8770）
+│       ├── console.html       # 控制台页面
+│       └── app/               # Android App 源码与 build_apk.py
+├── dist/                      # 构建产物（mcdev-console.apk，已 gitignore）
 ├── preview/                   # replay 生成的图片（自动创建，已 gitignore）
 ├── .cache/                    # 头像等运行缓存（自动创建，已 gitignore）
 └── docs/                      # 各图表效果示例图
@@ -217,6 +221,10 @@ python bot_qq.py
 > 官方机器人有**主动消息配额限制**（群聊每群每月 4 条），因此定时推送**默认关闭**；
 > 需要每天多次推送请使用方案 B。图表指令（`图表` / `排行图` / `趋势图` / `月报图`）
 > 会以**图片消息**返回，同样可用。
+>
+> **想彻底不挂电脑？** 可以把机器人跑在闲置安卓手机上（免 root），
+> 并配一个图形控制台 App（`dist/mcdev-console.apk`）：一键启停、看日志、改配置、查收益。
+> 详见 **[deploy/android/README.md](deploy/android/README.md)**。
 
 ---
 

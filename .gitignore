@@ -25,3 +25,8 @@ preview/
 # 编辑器
 .idea/
 .vscode/
+
+# Android 构建产物与签名密钥（密钥不要进仓库）
+dist/
+deploy/android/app/build/
+deploy/android/app/release.keystore

@@ -95,7 +95,66 @@ cd ~/qqbot
 
 ---
 
-## 五、保活设置（关键）
+## 五、手机 App（控制台）
+
+除了在 Termux 里敲命令，也可以装一个 App 当图形界面。
+App 只是控制台的壳：机器人本身仍跑在 Termux，App 通过
+`http://127.0.0.1:8770` 与它通信（只监听回环，局域网内其它设备访问不到）。
+
+**安装**
+
+```bash
+adb install dist/mcdev-console.apk
+```
+
+或把 `dist/mcdev-console.apk` 传到手机，点击安装（需允许「安装未知来源应用」）。
+
+**首次使用前，Termux 里要做两件事**
+
+1. 允许外部应用执行命令：
+
+   ```bash
+   mkdir -p ~/.termux
+   echo "allow-external-apps=true" >> ~/.termux/termux.properties
+   termux-reload-settings
+   ```
+
+2. 启动一次守护（会同时拉起控制台服务）：
+
+   ```bash
+   cd ~/qqbot && ./deploy/android/watchdog.sh start
+   ```
+
+   首次启动后，系统会给 App 授权「Termux: RUN_COMMAND」权限，
+   在 **系统设置 → 应用 → MC收益 → 权限** 里允许即可。
+
+**App 能做什么**
+
+| 页面 | 功能 |
+| --- | --- |
+| 首页 | 机器人 / 守护的实时状态，一键启动、重启、停止 |
+| 查询 | 快捷指令 + 输入框，直接看收益、地图、余额、图表 |
+| 日志 | 查看机器人日志，每 3 秒自动刷新 |
+| 配置 | 直接编辑 `.env` 并保存 |
+
+连不上控制台时，App 会显示离线页，里面有一键启动按钮和排查步骤。
+
+> 「停止」只会停机器人和守护，**控制台保持运行**，方便随时再启动；
+> 要连控制台一起停，用 `./deploy/android/watchdog.sh shutdown`。
+
+**自己重新构建 APK**
+
+```powershell
+python deploy\android\app\build_apk.py
+```
+
+需要 Android build-tools 34、platform android-35 和 **JDK 17**
+（d8 在 JDK 21+ 上会崩），脚本会读取环境变量 `ANDROID_SDK`（默认 `C:\Android\sdk`）
+与 `JDK17_HOME`（默认 `C:\Android\jdk17`）。产物在 `dist/mcdev-console.apk`。
+
+---
+
+## 六、保活设置（关键）
 
 安卓对后台进程管得很严，不做下面几步，息屏后大概率被杀。
 
@@ -125,13 +184,14 @@ cd ~/qqbot
 
 ---
 
-## 六、常用命令
+## 七、常用命令
 
 ```bash
-./deploy/android/watchdog.sh start     # 启动守护
+./deploy/android/watchdog.sh start     # 启动守护（同时拉起控制台）
 ./deploy/android/watchdog.sh status    # 查看状态
 ./deploy/android/watchdog.sh log       # 实时日志
-./deploy/android/watchdog.sh stop      # 停止
+./deploy/android/watchdog.sh stop      # 停止机器人（保留控制台）
+./deploy/android/watchdog.sh shutdown  # 全部停止
 ./deploy/android/service.sh start      # 无守护的后台启动（临时调试用）
 ```
 
@@ -140,7 +200,7 @@ cd ~/qqbot
 
 ---
 
-## 七、常见问题
+## 八、常见问题
 
 **Q：需要 root 吗？**
 不需要。整个方案只用到 Termux 普通权限。
